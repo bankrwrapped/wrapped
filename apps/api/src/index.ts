@@ -1,4 +1,4 @@
-import { getWrappedController } from "./controllers/wrappedController";
+import { getLeaderboardController, getWrappedController } from "./controllers/wrappedController";
 import { checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./middleware/rateLimit";
 import { wrappedService } from "./services/wrappedService";
 
@@ -55,6 +55,16 @@ Bun.serve({
       } catch (err) {
         console.error("[api] search request failed:", err);
         return withCors(Response.json({ results: [] }));
+      }
+    }
+
+    if (url.pathname === "/api/leaderboard" && req.method === "GET") {
+      try {
+        const res = await getLeaderboardController();
+        return withCors(res);
+      } catch (err) {
+        console.error("[api] leaderboard request failed:", err);
+        return withCors(Response.json({ error: "internal error" }, { status: 500 }));
       }
     }
 

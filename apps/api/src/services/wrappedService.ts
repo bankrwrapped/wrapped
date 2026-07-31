@@ -269,6 +269,12 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   };
 }
 
+async function attachRank(row: WrappedCacheRow): Promise<WrappedCacheRow> {
+  const { rank, totalUsers } = await wrappedCacheRepository.getRank(row.walletAddress);
+  const percentile = totalUsers > 0 ? Math.ceil((rank / totalUsers) * 100) : 100;
+  return { ...row, rank, totalUsers, percentile };
+}
+
 async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
   const match = await resolveWallet(handle);
   if (!match) return null;
@@ -279,7 +285,7 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
   const now = Date.now();
   if (cached && now - Date.parse(cached.updatedAt) < STALE_MS) {
     console.log("[wrappedService] serving from cache, no Bankr refetch");
-    return cached;
+    return attachRank(cached);
   }
 
   const payload = await fetchFromBankr(match);
@@ -290,7 +296,11 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
     payload
   );
   console.log("[wrappedService] upsert done");
-  return row;
+  return attachRank(row);
+}
+
+async function getLeaderboard(limit = 20) {
+  return wrappedCacheRepository.getTopTraders(limit);
 }
 
 // Cheap, unauthenticated typeahead lookup - deliberately does NOT do
@@ -322,4 +332,5 @@ export const wrappedService = {
   fetchFromBankr,
   getWrapped,
   searchHandles,
+  getLeaderboard,
 };

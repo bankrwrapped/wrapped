@@ -10,3 +10,8 @@ export async function getWrappedController(req: Request, handle: string): Promis
   }
   return Response.json(row);
 }
+
+export async function getLeaderboardController(): Promise<Response> {
+  const entries = await wrappedService.getLeaderboard(20);
+  return Response.json({ entries });
+}

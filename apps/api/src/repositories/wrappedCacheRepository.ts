@@ -92,8 +92,28 @@ export const wrappedCacheRepository = {
     return toCacheRow(savedRow);
   },
 
-  // Powers the marketing / partnership leaderboard. Not wired to a route yet -
-  // that's the next step once this lands.
+  // Live rank + total user count for a single wallet. Recomputed on every
+  // request - never cached alongside payload, since other users being
+  // wrapped constantly shifts this. Returns rank 1 = highest earner.
+  async getRank(wallet: string): Promise<{ rank: number; totalUsers: number }> {
+    const [totalRow] = (await db`
+      select count(*)::int as total from wrapped_profiles
+    `) as Array<{ total: number }>;
+    const totalUsers = totalRow?.total ?? 0;
+
+    const [rankRow] = (await db`
+      select count(*)::int as higher
+      from wrapped_profiles
+      where total_earnings_usd > (
+        select total_earnings_usd from wrapped_profiles where wallet_address = ${wallet}
+      )
+    `) as Array<{ higher: number }>;
+    const rank = (rankRow?.higher ?? 0) + 1;
+
+    return { rank, totalUsers };
+  },
+
+  // Powers the marketing / partnership leaderboard. Wired to GET /api/leaderboard.
   async getTopTraders(limit = 20): Promise<TopTraderEntry[]> {
     const rows = (await db`
       select wallet_address, username, display_name, avatar_url,

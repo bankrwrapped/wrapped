@@ -162,6 +162,11 @@ export interface WrappedCacheRow {
   username: string;
   payload: WrappedPayload;
   updatedAt: string;
+  // Computed live on every request (not persisted) - a user's rank shifts
+  // as other users get wrapped, so caching it alongside payload would go stale.
+  rank: number;
+  totalUsers: number;
+  percentile: number;
 }
 
 // ---- Marketing / partnership leaderboard ----
