@@ -5,6 +5,7 @@ import bannerAsset from "@/assets/bankr-banner.jpg.asset.json";
 import { Counter } from "@/components/wrapped/Counter";
 import { TopTokensList } from "@/components/wrapped/TopTokensList";
 import { Button } from "@/components/ui/button";
+import { getArchetype } from "@/lib/archetype";
 import { formatUsd, formatUsdFull, type WrappedProfile } from "@/lib/wrapped-data";
 
 function Kicker({ children }: { children: React.ReactNode }) {
@@ -131,6 +132,26 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
           <Counter value={total} delay={900} />
         </p>
       </div>
+      {p.bestDay ? (
+        <div
+          className="glass animate-rise mx-auto max-w-xs rounded-2xl p-4"
+          style={{ animationDelay: "1100ms" }}
+        >
+          <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">
+            Best day
+          </p>
+          <p className="mt-1 font-display text-2xl font-extrabold text-accent">
+            <Counter value={p.bestDay.usd} delay={1200} />
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {new Date(p.bestDay.date).toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -177,8 +198,9 @@ export function SceneUnclaimed({ p }: { p: WrappedProfile }) {
 
 export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: () => void }) {
   const total = p.creatorEarnings + p.pleaseBroEarnings;
+  const archetype = getArchetype(p);
   const shareText =
-    "My Bankr Wrapped: " +
+    `I'm "${archetype.title}" on Bankr Wrapped: ` +
     formatUsdFull(total) +
     " earned across " +
     p.tokensLaunched +
@@ -196,6 +218,12 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
           />
           <div className="space-y-1">
             <h3 className="font-display text-2xl font-extrabold">{p.displayName}</h3>
+            <p className="animate-rise font-display text-lg font-bold text-accent" style={{ animationDelay: "140ms" }}>
+              {archetype.title}
+            </p>
+            <p className="animate-rise text-sm text-muted-foreground" style={{ animationDelay: "180ms" }}>
+              {archetype.description}
+            </p>
           </div>
           <div className="grid grid-cols-3 gap-3 pt-1">
             {[
@@ -214,8 +242,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Button variant="hero" size="xl" className="flex-1" asChild>
-          <a
-            href={"https://x.com/intent/tweet?text=" + encodeURIComponent(shareText)}
+          <a href={"https://x.com/intent/tweet?text=" + encodeURIComponent(shareText)}
             target="_blank"
             rel="noreferrer"
           >
@@ -223,8 +250,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
           </a>
         </Button>
         <Button variant="glass" size="xl" className="flex-1" asChild>
-          <a
-            href={"https://warpcast.com/~/compose?text=" + encodeURIComponent(shareText)}
+          <a href={"https://warpcast.com/~/compose?text=" + encodeURIComponent(shareText)}
             target="_blank"
             rel="noreferrer"
           >

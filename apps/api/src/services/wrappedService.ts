@@ -225,6 +225,10 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   );
   const unclaimed = toUsd(creatorClaimableWeth + pleaseBroClaimableWeth);
 
+  const bestDay = creator.lifetimeBestDay
+    ? { date: creator.lifetimeBestDay.date, usd: toUsd(parseAmount(creator.lifetimeBestDay.weth)) }
+    : null;
+
   const total = creatorEarnings + pleaseBroEarnings;
   const bothFeesOk =
     creatorResult.status === "ok" && beneficiaryResult.status === "ok";
@@ -256,6 +260,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       total: creatorEarnings + pleaseBroEarnings,
     },
     claimable: { unclaimed },
+    bestDay,
     summary: { tokensLaunched: creator.tokens.length, hasActivity },
     meta: {
       creatorFeesStatus: creatorResult.status,

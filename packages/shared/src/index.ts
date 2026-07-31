@@ -139,6 +139,9 @@ export interface WrappedPayload {
     total: number;
   };
   claimable: { unclaimed: number };
+  // Best single day of creator earnings, converted to USD. null if Bankr
+  // never reported one (e.g. no earnings history at all).
+  bestDay: { date: string; usd: number } | null;
   summary: {
     tokensLaunched: number;
     // False only when every activity signal is genuinely zero AND both fee

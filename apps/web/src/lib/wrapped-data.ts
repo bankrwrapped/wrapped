@@ -25,6 +25,7 @@ export type WrappedProfile = {
   creatorEarnings: number;
   pleaseBroEarnings: number;
   unclaimed: number;
+  bestDay: { date: string; usd: number } | null;
   creatorFeesStatus: FeesFetchStatus;
   beneficiaryFeesStatus: FeesFetchStatus;
 };
@@ -59,6 +60,7 @@ type ApiWrappedCacheRow = {
       total: number;
     };
     claimable: { unclaimed: number };
+    bestDay: { date: string; usd: number } | null;
     summary: { tokensLaunched: number; hasActivity: boolean };
     meta: {
       creatorFeesStatus: FeesFetchStatus;
@@ -85,6 +87,7 @@ function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     creatorEarnings: payload.earnings.creatorEarnings,
     pleaseBroEarnings: payload.earnings.pleaseBroEarnings,
     unclaimed: payload.claimable.unclaimed,
+    bestDay: payload.bestDay,
     creatorFeesStatus: payload.meta.creatorFeesStatus,
     beneficiaryFeesStatus: payload.meta.beneficiaryFeesStatus,
   };
