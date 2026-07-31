@@ -172,3 +172,28 @@ export const CHAIN_LABEL: Record<Chain, string> = {
   base: "Base",
   robinhood: "Robinhood",
 };
+
+export type LeaderboardEntry = {
+  walletAddress: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+  tokensLaunched: number;
+  pleaseBroCount: number;
+  totalEarningsUsd: number;
+  unclaimedUsd: number;
+  updatedAt: string;
+};
+
+/** Top-20 earners. Degrades to [] on any failure - a leaderboard page
+ * showing "no data" is better than a hard crash. */
+export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
+  try {
+    const res = await fetch(`${API_URL}/api/leaderboard`);
+    if (!res.ok) return [];
+    const data: { entries: LeaderboardEntry[] } = await res.json();
+    return data.entries ?? [];
+  } catch {
+    return [];
+  }
+}

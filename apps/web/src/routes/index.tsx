@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search } from "lucide-react";
 
@@ -252,6 +252,14 @@ function Index() {
               {error}
             </p>
           )}
+
+          <Link
+            to="/leaderboard"
+            className="animate-rise block text-sm text-muted-foreground underline-offset-4 hover:underline"
+            style={{ animationDelay: "280ms" }}
+          >
+            View leaderboard
+          </Link>
         </div>
       </main>
     );
