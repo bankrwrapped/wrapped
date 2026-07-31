@@ -23,6 +23,24 @@ function tooManyRequests(retryAfterSeconds: number): Response {
   );
 }
 
+// Railway sits in front of this app behind its own edge proxy, so
+// server.requestIP() returns RAILWAY'S internal address for every request,
+// not the visitor's - previously this silently collapsed every real user
+// into one shared rate-limit bucket, meaning one active visitor could get
+// everyone else 429'd. Railway forwards the real client via X-Forwarded-For
+// (first entry in the comma-separated chain is the original client).
+// Falls back to the raw socket IP only when the header is absent (local
+// dev with no proxy in front) - Railway always sets this header in
+// production, so this fallback never fires there.
+function getClientIp(req: Request, server: Bun.Server): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return server.requestIP(req)?.address ?? "unknown";
+}
+
 Bun.serve({
   port: PORT,
   // Default is 10s, which is too tight for a cold request doing 3 parallel
@@ -40,7 +58,7 @@ Bun.serve({
       return withCors(Response.json({ status: "ok" }));
     }
     if (url.pathname === "/api/search" && req.method === "GET") {
-      const clientIp = server.requestIP(req)?.address ?? "unknown";
+      const clientIp = getClientIp(req, server);
       const limit = checkSearchSuggestRouteLimit(clientIp);
       if (!limit.allowed) {
         return withCors(tooManyRequests(limit.retryAfterSeconds));
@@ -70,7 +88,7 @@ Bun.serve({
 
     const wrappedMatch = url.pathname.match(/^\/api\/wrapped\/([^/]+)$/);
     if (wrappedMatch && req.method === "GET") {
-      const clientIp = server.requestIP(req)?.address ?? "unknown";
+      const clientIp = getClientIp(req, server);
       const limit = checkWrappedRouteLimit(clientIp);
       if (!limit.allowed) {
         return withCors(tooManyRequests(limit.retryAfterSeconds));

@@ -166,12 +166,17 @@ export function SceneTimeline({ p }: { p: WrappedProfile }) {
   return (
     <div className="w-full space-y-6">
       <div className="text-center">
-        <Kicker>Your earning journey</Kicker>
+        <Kicker>Your creator earning journey</Kicker>
         <h2 className="animate-scene-in font-display text-3xl font-extrabold sm:text-4xl">
           Built up over time
         </h2>
       </div>
-      {activeDays.length > 0 ? (
+      {activeDays.length === 0 && p.pleaseBro.length > 0 ? (
+        <p className="animate-rise glass rounded-2xl px-4 py-6 text-center text-sm text-muted-foreground">
+          Your Please Bro earnings don't have day-by-day history available yet
+          &mdash; check the earnings screen for your full total.
+        </p>
+      ) : activeDays.length > 0 ? (
         <div className="glass animate-rise flex h-40 items-end gap-[2px] overflow-hidden rounded-2xl p-3" style={{ animationDelay: "150ms" }}>
           {allDays.map((d) => (
             <div key={d.date} title={d.date + ": " + formatUsd(d.usd)}

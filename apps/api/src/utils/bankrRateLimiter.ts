@@ -12,7 +12,16 @@ function createLimiter(windowMs: number, max: number): Limiter {
   return { windowMs, max, timestamps: [] };
 }
 
+// Previously unbounded - under a real traffic spike, a request could queue
+// here indefinitely before even starting its outbound fetch, with no ceiling
+// on total response time. Now caps total queue wait; callers that already
+// degrade gracefully on failure (fetchCreatorFees/fetchBeneficiaryFees) will
+// fall back cleanly instead of hanging, and callers that don't catch
+// (resolveWallet) surface a clear error instead of a silent stall.
+const MAX_QUEUE_WAIT_MS = 30_000;
+
 async function waitForSlot(limiter: Limiter): Promise<void> {
+  const start = Date.now();
   for (;;) {
     const now = Date.now();
     limiter.timestamps = limiter.timestamps.filter((t) => now - t < limiter.windowMs);
@@ -22,8 +31,13 @@ async function waitForSlot(limiter: Limiter): Promise<void> {
       return;
     }
 
+    const elapsed = now - start;
+    if (elapsed >= MAX_QUEUE_WAIT_MS) {
+      throw new Error("Bankr API rate-limit queue exceeded " + MAX_QUEUE_WAIT_MS + "ms - too much traffic backed up right now");
+    }
+
     const oldest = limiter.timestamps[0];
-    const waitMs = limiter.windowMs - (now - oldest) + 10;
+    const waitMs = Math.max(10, Math.min(limiter.windowMs - (now - oldest) + 10, MAX_QUEUE_WAIT_MS - elapsed));
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
 }
