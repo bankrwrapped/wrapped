@@ -247,6 +247,10 @@ function Index() {
             </Button>
           </form>
 
+          <p className="animate-rise text-xs text-muted-foreground" style={{ animationDelay: "260ms" }}>
+            "Please Bro" tokens are ones where someone redirected their creator fees to you.
+          </p>
+
           {error && (
             <p className="animate-rise text-sm text-destructive" role="alert">
               {error}
