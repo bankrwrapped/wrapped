@@ -5,9 +5,9 @@ export type TokenEntry = {
   name: string;
   symbol: string;
   chain: Chain;
-  // null means "can't be derived" (currently: Clanker-source tokens,
-  // whose swap fee isn't exposed by Bankr's API) - NOT zero volume.
-  volume: number | null;
+  // Actual USD fees earned on this specific token - real for both Doppler
+  // and Clanker sources, never null (see shared package doc-comment).
+  feesEarned: number;
 };
 
 export type FeesFetchStatus = "ok" | "unavailable";
@@ -161,9 +161,6 @@ export const formatUsd = (n: number) =>
       ? `$${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}K`
       : `$${n.toFixed(0)}`;
 
-// For volume fields that may be null (can't be derived - see TokenEntry.volume).
-export const formatUsdOrUnavailable = (n: number | null) =>
-  n === null ? "\u2014" : formatUsd(n);
 
 export const formatUsdFull = (n: number) =>
   `$${Math.round(n).toLocaleString("en-US")}`;

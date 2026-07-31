@@ -45,9 +45,13 @@ function pickBestMatch(
 
 async function resolveWallet(handle: string): Promise<BankrUserSearchResult | null> {
   console.log("[wrappedService] resolveWallet: start, handle=" + handle);
+  const rateLimitStart = Date.now();
   await bankrRateLimiter.beforeSearch();
+  console.log("[wrappedService] resolveWallet: rate-limit wait took " + (Date.now() - rateLimitStart) + "ms");
   const url = BANKR_API_BASE + "/users/search?query=" + encodeURIComponent(handle);
+  const fetchStart = Date.now();
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  console.log("[wrappedService] resolveWallet: outbound fetch took " + (Date.now() - fetchStart) + "ms");
   if (res.status === 400) {
     // Bankr rejects malformed/oversized queries with 400 rather than an
     // empty result set. Treat it the same as "no user found" -> 404,
@@ -233,27 +237,6 @@ function wethAmount(
   return 0;
 }
 
-// Bankr's public API has no direct trading-volume endpoint. Every launch
-// carries a fixed 0.7% Doppler swap fee, and each token entry tells us the
-// beneficiary's exact share of that fee (e.g. "95.00%"). So pool volume can
-// be derived from fees actually earned:
-//   volume = feeWeth / (0.007 * share)
-// This only accounts for the WETH-denominated side of fees (see wethAmount),
-// which is the standard "input-side" convention most DEX UIs use for volume.
-function parseShare(raw: string | undefined | null): number {
-  if (!raw) return 0;
-  const n = parseFloat(raw.replace("%", ""));
-  return Number.isFinite(n) ? n / 100 : 0;
-}
-
-const DOPPLER_SWAP_FEE_RATE = 0.007;
-
-function deriveVolumeWeth(feeWeth: number, shareRaw: string | undefined | null): number {
-  const share = parseShare(shareRaw);
-  if (share <= 0) return 0;
-  return feeWeth / (DOPPLER_SWAP_FEE_RATE * share);
-}
-
 // Historical prices for the day-by-day earnings chart/bestDay/streak, so a
 // fee earned 60 days ago is priced at THAT day's ETH/USD rate rather than
 // today's. Falls back to the current price per-date on any miss/failure -
@@ -305,27 +288,23 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
 
   const launchedTokens: WrappedTokenEntry[] = creator.tokens.map((t) => {
     const feeWeth = wethAmount(t, "claimable") + wethAmount(t, "claimed");
-    // Clanker's swap fee is configurable per-token and not exposed here -
-    // only Doppler tokens have a real, derivable volume (see shared type doc-comment).
-    const canDeriveVolume = t.source === "doppler";
     return {
       tokenAddress: t.tokenAddress,
       name: t.name,
       symbol: t.symbol,
       chain: t.chain,
-      volume: canDeriveVolume ? toUsd(deriveVolumeWeth(feeWeth, t.share)) : null,
+      feesEarned: toUsd(feeWeth),
     };
   });
 
   const pleaseBroTokens: WrappedTokenEntry[] = beneficiary.tokens.map((t) => {
     const feeWeth = wethAmount(t, "claimable") + wethAmount(t, "claimed");
-    const canDeriveVolume = t.source === "doppler";
     return {
       tokenAddress: t.tokenAddress,
       name: t.name,
       symbol: t.symbol,
       chain: t.chain,
-      volume: canDeriveVolume ? toUsd(deriveVolumeWeth(feeWeth, t.share)) : null,
+      feesEarned: toUsd(feeWeth),
     };
   });
 

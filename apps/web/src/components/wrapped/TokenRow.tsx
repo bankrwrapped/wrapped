@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { CHAIN_LABEL, formatUsdOrUnavailable, type TokenEntry } from "@/lib/wrapped-data";
+import { CHAIN_LABEL, formatUsd, type TokenEntry } from "@/lib/wrapped-data";
 const chainDot: Record<TokenEntry["chain"], string> = {
   base: "bg-chain-base",
   robinhood: "bg-chain-robinhood",
@@ -25,10 +25,10 @@ export function TokenRow({ token, index }: { token: TokenEntry; index: number })
       </div>
       <div className="text-right">
         <p className="font-display text-base font-bold text-accent">
-          {formatUsdOrUnavailable(token.volume)}
+          {formatUsd(token.feesEarned)}
         </p>
         <p className="text-[11px] uppercase tracking-widest text-muted-foreground">
-          {token.volume === null ? "n/a" : "volume"}
+          earned
         </p>
       </div>
     </li>

@@ -1,4 +1,4 @@
-import { CHAIN_LABEL, formatUsdOrUnavailable, type TokenEntry } from "@/lib/wrapped-data";
+import { CHAIN_LABEL, formatUsd, type TokenEntry } from "@/lib/wrapped-data";
 
 const chainDot: Record<TokenEntry["chain"], string> = {
   base: "bg-chain-base",
@@ -14,7 +14,7 @@ export function TokenChip({ token, index }: { token: TokenEntry; index: number }
     >
       <span className={`size-2 shrink-0 rounded-full ${chainDot[token.chain]}`} aria-hidden />
       <span className="max-w-[7rem] truncate text-xs font-medium">{token.symbol}</span>
-      <span className="text-xs font-semibold text-muted-foreground">{formatUsdOrUnavailable(token.volume)}</span>
+      <span className="text-xs font-semibold text-muted-foreground">{formatUsd(token.feesEarned)}</span>
     </li>
   );
 }

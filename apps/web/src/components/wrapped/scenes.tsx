@@ -35,14 +35,18 @@ export function SceneIdentity({ p }: { p: WrappedProfile }) {
           className="animate-rise font-mono text-sm text-muted-foreground"
           style={{ animationDelay: "200ms" }}
         >
-          {p.wallet}
+          {p.wallet.slice(0, 6)}&hellip;{p.wallet.slice(-4)}
         </p>
       </div>
     </div>
   );
 }
 
-export function SceneContribution() {
+export function SceneContribution({ p }: { p: WrappedProfile }) {
+  const chains = new Set([...p.launched, ...p.pleaseBro].map((t) => t.chain));
+  const chainCount = chains.size;
+  const chainPhrase =
+    chainCount >= 2 ? "across Base and Robinhood Chain" : "on the Bankr launchpad";
   return (
     <div className="space-y-6 text-center">
       <Kicker>Bankr Wrapped</Kicker>
@@ -50,8 +54,8 @@ export function SceneContribution() {
         className="animate-scene-in font-display text-4xl font-extrabold leading-[1.05] sm:text-6xl"
         style={{ animationDelay: "150ms" }}
       >
-        Here's how you contributed to the{" "}
-        <span className="text-gradient">world's best launchpad.</span>
+        Here's how you built {chainPhrase}{" "}
+        <span className="text-gradient">this year.</span>
       </h2>
     </div>
   );
@@ -67,7 +71,7 @@ function DataUnavailable() {
 }
 
 export function SceneLaunched({ p }: { p: WrappedProfile }) {
-  const withVolume = p.launched.filter((t) => t.volume > 0);
+  const withVolume = p.launched.filter((t) => t.feesEarned > 0);
   const unavailable = p.creatorFeesStatus === "unavailable";
   return (
     <div className="w-full space-y-6">
@@ -89,13 +93,22 @@ export function SceneLaunched({ p }: { p: WrappedProfile }) {
 }
 
 export function ScenePleaseBro({ p }: { p: WrappedProfile }) {
-  const withVolume = p.pleaseBro.filter((t) => t.volume > 0);
+  const withVolume = p.pleaseBro.filter((t) => t.feesEarned > 0);
   const unavailable = p.beneficiaryFeesStatus === "unavailable";
   return (
     <div className="w-full space-y-6">
       <div className="text-center">
         <Kicker>Redirected fees</Kicker>
-        <h2 className="animate-scene-in font-display text-4xl font-extrabold text-accent sm:text-5xl">
+        {unavailable ? (
+          <p className="animate-scene-in font-display text-2xl font-semibold text-muted-foreground">
+            —
+          </p>
+        ) : (
+          <p className="animate-scene-in font-display text-7xl font-extrabold sm:text-8xl">
+            <Counter value={p.pleaseBro.length} prefix="" delay={200} />
+          </p>
+        )}
+        <h2 className="animate-rise font-display text-2xl font-extrabold text-accent sm:text-3xl" style={{ animationDelay: "250ms" }}>
           Please Bro Tokens
         </h2>
       </div>
@@ -160,7 +173,16 @@ export function SceneTimeline({ p }: { p: WrappedProfile }) {
   // Render every day in the window, not just nonzero ones - a single
   // active day among many empty ones should look like a spike on a
   // timeline, not a solid block filling the whole chart.
-  const allDays = p.dailyEarnings;
+  //
+  // For sparse activity (few active days out of a ~90-day window), a full-
+  // width chart drowns the spike in flat bars and reads as "broken" rather
+  // than "sparse but real". Never changes the underlying data - only which
+  // slice of it we display - so bestDay/streak/claimCount stay computed
+  // from the full window regardless.
+  const rawActiveDays = p.dailyEarnings.filter((d) => d.usd > 0);
+  const allDays = rawActiveDays.length > 0 && rawActiveDays.length <= 3
+    ? p.dailyEarnings.slice(-14)
+    : p.dailyEarnings;
   const activeDays = allDays.filter((d) => d.usd > 0);
   const max = Math.max(1, ...allDays.map((d) => d.usd));
   return (

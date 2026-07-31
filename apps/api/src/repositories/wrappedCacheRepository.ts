@@ -81,7 +81,7 @@ export const wrappedCacheRepository = {
           insert into wrapped_tokens (
             wallet_address, token_address, name, symbol, chain, category, volume_usd, updated_at
           ) values (
-            ${wallet}, ${t.tokenAddress}, ${t.name}, ${t.symbol}, ${t.chain}, ${t.category}, ${t.volume}, ${now}
+            ${wallet}, ${t.tokenAddress}, ${t.name}, ${t.symbol}, ${t.chain}, ${t.category}, ${t.feesEarned}, ${now}
           )
         `;
       }

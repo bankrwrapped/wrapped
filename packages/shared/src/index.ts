@@ -104,19 +104,14 @@ export interface WrappedTokenEntry {
   name: string;
   symbol: string;
   chain: Chain;
-  // Estimated USD trading volume for this token's pool, derived from
-  // (claimable + claimed WETH-side fees) / (0.007 * beneficiary share).
-  // Bankr's public API has no direct volume endpoint - this is a derived
-  // approximation based on the documented 0.7% Doppler swap fee mechanic,
-  // not a raw on-chain volume count.
-  // ONLY computed for Doppler-source tokens. Clanker's swap fee is
-  // configurable per-token at deployment (0.25%-5%, per Clanker's own
-  // docs) and not exposed anywhere in this API response, so it cannot be
-  // reliably derived for Clanker-source tokens (share: "creator" is a
-  // role label there, not a percentage). null means "not derivable", NOT
-  // "zero volume" - real earnings/claimable $ for these tokens are still
-  // accurate, since those come straight from Bankr's own aggregate totals.
-  volume: number | null;
+  // Actual USD fees (claimable + claimed) attributable to this specific
+  // token, for both Doppler and Clanker sources - unlike the old derived
+  // "volume" estimate, this is real and never null, since fee amounts
+  // come straight from Bankr's own claimable/claimed data regardless of
+  // source. Trading volume itself still isn't derivable for Clanker
+  // tokens (their swap fee rate isn't exposed), so this represents
+  // earnings, not volume.
+  feesEarned: number;
 }
 
 export interface WrappedUser {
