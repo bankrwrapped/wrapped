@@ -24,7 +24,23 @@ function pickBestMatch(
   );
   if (exact.length === 0) return results[0];
   const twitterExact = exact.find((r) => r.platform === "twitter");
-  return twitterExact ?? exact[0];
+  if (twitterExact) return twitterExact;
+  if (exact.length === 1) return exact[0];
+  // Multiple non-Twitter accounts share this exact handle (seen in practice -
+  // two separate jessepollak0 Farcaster entries with different wallets) and
+  // Bankr's API gives us no field to tell which is "correct". Previously
+  // `exact[0]` trusted whatever order the API happened to return, which
+  // risks the SAME search resolving to a DIFFERENT wallet across requests
+  // if that ordering isn't stable. Sort deterministically ourselves so a
+  // repeat search always lands on the same wallet, even though we still
+  // can't know which duplicate is the "real" one from this data alone.
+  console.warn(
+    "[wrappedService] pickBestMatch: " + exact.length +
+    " duplicate exact-match accounts for '" + query +
+    "', no Twitter match to disambiguate - picking deterministically by wallet address"
+  );
+  const sorted = [...exact].sort((a, b) => a.evmAddress.localeCompare(b.evmAddress));
+  return sorted[0];
 }
 
 async function resolveWallet(handle: string): Promise<BankrUserSearchResult | null> {
@@ -51,7 +67,10 @@ async function fetchCreatorFees(
   console.log("[wrappedService] fetchCreatorFees: start");
   try {
     await bankrRateLimiter.beforeFeesCall();
-    const res = await fetch(BANKR_API_BASE + "/public/doppler/creator-fees/" + address, {
+    // Bankr's dailyEarnings window defaults to 30 days if omitted (per docs) -
+    // we never passed a days param at all, silently truncating the chart,
+    // streak, and bestDay to a third of the 90-day max Bankr actually allows.
+    const res = await fetch(BANKR_API_BASE + "/public/doppler/creator-fees/" + address + "?days=90", {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error("creator-fees failed: " + res.status);
@@ -83,7 +102,7 @@ async function fetchBeneficiaryFees(
   console.log("[wrappedService] fetchBeneficiaryFees: start");
   try {
     await bankrRateLimiter.beforeFeesCall();
-    const res = await fetch(BANKR_API_BASE + "/public/doppler/beneficiary-fees/" + address, {
+    const res = await fetch(BANKR_API_BASE + "/public/doppler/beneficiary-fees/" + address + "?days=90", {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error("beneficiary-fees failed: " + res.status);
@@ -187,6 +206,8 @@ function parseAmount(raw: string | undefined | null): number {
 
 function wethAmount(
   entry: {
+    tokenAddress?: string;
+    symbol?: string;
     token0Label: string;
     token1Label: string;
     claimable: { token0: string; token1: string };
@@ -196,6 +217,19 @@ function wethAmount(
 ): number {
   if (entry.token0Label === "WETH") return parseAmount(entry[field].token0);
   if (entry.token1Label === "WETH") return parseAmount(entry[field].token1);
+  // Neither side is labeled WETH. Every Doppler pool observed this session
+  // (Base and Robinhood alike) quotes in WETH, but that isn't guaranteed by
+  // the API contract - silently returning 0 here would make real fees
+  // vanish with no trace, especially for pleaseBroEarnings, which has no
+  // Bankr-side aggregate to fall back on. Log loudly instead of assuming
+  // this can't happen.
+  console.warn(
+    "[wrappedService] wethAmount: neither token0Label nor token1Label is WETH - fee amount defaulting to 0. " +
+    "tokenAddress=" + (entry.tokenAddress ?? "unknown") +
+    " symbol=" + (entry.symbol ?? "unknown") +
+    " token0Label=" + entry.token0Label +
+    " token1Label=" + entry.token1Label
+  );
   return 0;
 }
 
@@ -218,6 +252,42 @@ function deriveVolumeWeth(feeWeth: number, shareRaw: string | undefined | null):
   const share = parseShare(shareRaw);
   if (share <= 0) return 0;
   return feeWeth / (DOPPLER_SWAP_FEE_RATE * share);
+}
+
+// Historical prices for the day-by-day earnings chart/bestDay/streak, so a
+// fee earned 60 days ago is priced at THAT day's ETH/USD rate rather than
+// today's. Falls back to the current price per-date on any miss/failure -
+// this is a display-accuracy improvement, never a hard requirement.
+async function fetchHistoricalEthPrices(dates: string[]): Promise<Record<string, number>> {
+  if (dates.length === 0) return {};
+  console.log("[wrappedService] fetchHistoricalEthPrices: start, dates=" + dates.length);
+  try {
+    const timestamps = dates.map((d) => Math.floor(new Date(d + "T12:00:00Z").getTime() / 1000));
+    const coinsParam = JSON.stringify({ "coingecko:ethereum": timestamps });
+    // searchWidth explicitly requested (24h) rather than trusting DefiLlama's
+    // unstated default - our own match filter below is widened to match,
+    // so we're not silently rejecting a good price because our cutoff was
+    // tighter than what we actually asked the API to search.
+    const res = await fetch(
+      "https://coins.llama.fi/batchHistorical?coins=" + encodeURIComponent(coinsParam) + "&searchWidth=24h",
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+    );
+    if (!res.ok) throw new Error("batchHistorical failed: " + res.status);
+    const data = (await res.json()) as {
+      coins?: { "coingecko:ethereum"?: { prices?: { timestamp: number; price: number }[] } };
+    };
+    const prices = data.coins?.["coingecko:ethereum"]?.prices ?? [];
+    const result: Record<string, number> = {};
+    for (let i = 0; i < dates.length; i++) {
+      const match = prices.find((p) => Math.abs(p.timestamp - timestamps[i]) < 24 * 3600);
+      if (match) result[dates[i]] = match.price;
+    }
+    console.log("[wrappedService] fetchHistoricalEthPrices: done, resolved=" + Object.keys(result).length + "/" + dates.length);
+    return result;
+  } catch (err) {
+    console.log("[wrappedService] fetchHistoricalEthPrices: failed entirely, falling back to current price for all dates, err=" + String(err));
+    return {};
+  }
 }
 
 async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayload> {
@@ -289,10 +359,21 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   // dailyEarnings window we actually fetch (e.g. lifetimeDays: 1 while
   // dailyEarnings spans ~90 days) - deriving our own keeps the "best day"
   // callout consistent with the chart we render right next to it.
-  const dailyEarnings = creator.dailyEarnings.map((d) => ({
-    date: d.date,
-    usd: toUsd(parseAmount(d.weth)),
-  }));
+  //
+  // Each day is priced at THAT day's ETH/USD rate, not today's - only
+  // fetched for dates with nonzero earnings (a $0 day is $0 regardless
+  // of price). Falls back to the current price for any date the batch
+  // historical call misses or fails on entirely.
+  const nonzeroDates = creator.dailyEarnings
+    .filter((d) => parseAmount(d.weth) > 0)
+    .map((d) => d.date);
+  const historicalPrices = await fetchHistoricalEthPrices(nonzeroDates);
+
+  const dailyEarnings = creator.dailyEarnings.map((d) => {
+    const weth = parseAmount(d.weth);
+    const priceForDay = historicalPrices[d.date] ?? ethUsd;
+    return { date: d.date, usd: weth * priceForDay };
+  });
 
   const bestDay = dailyEarnings.reduce(
     (best, d) => (d.usd > (best?.usd ?? 0) ? d : best),
@@ -324,7 +405,14 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     return longest;
   })();
 
-  const claimCount = creator.totals.claimCount;
+  // Creator claims only previously - Please Bro claims (beneficiary.tokens[]
+  // each carry their own claimed.count) were silently excluded, undercounting
+  // total claim activity now that earnings itself includes both sources.
+  const pleaseBroClaimCount = beneficiary.tokens.reduce(
+    (sum, t) => sum + (t.claimed?.count ?? 0),
+    0
+  );
+  const claimCount = creator.totals.claimCount + pleaseBroClaimCount;
 
   const total = creatorEarnings + pleaseBroEarnings;
   const bothFeesOk =

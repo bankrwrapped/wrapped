@@ -62,15 +62,16 @@ export function getArchetype(p: WrappedProfile): Archetype {
     };
   }
 
-  // One and Done
-  if (p.tokensLaunched === 1) {
-    const onlyToken = p.launched[0];
-    if (onlyToken && onlyToken.volume !== null && onlyToken.volume >= 500) {
-      return {
-        title: "One and Done",
-        description: "One launch, real volume. Quality over quantity.",
-      };
-    }
+  // One and Done - was gated on the derived `volume` field, which is
+  // ALWAYS null for Clanker-sourced tokens (not derivable, per Bankr's fee
+  // model), so this could never fire for a solo Clanker launcher no matter
+  // how much they earned. Use actual earnings instead, which is real for
+  // both Doppler and Clanker tokens.
+  if (p.tokensLaunched === 1 && totalEarned >= 100) {
+    return {
+      title: "One and Done",
+      description: "One launch, real earnings. Quality over quantity.",
+    };
   }
 
   // Fallback

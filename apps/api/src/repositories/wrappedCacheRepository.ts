@@ -101,11 +101,23 @@ export const wrappedCacheRepository = {
     `) as Array<{ total: number }>;
     const totalUsers = totalRow?.total ?? 0;
 
+    // Tie-break on updated_at: users with equal total_earnings_usd (very
+    // common at $0) previously all got the same rank number. Whoever
+    // checked their Wrapped first now wins the tie, giving every user a
+    // distinct rank rather than large blocks sharing one number.
     const [rankRow] = (await db`
       select count(*)::int as higher
       from wrapped_profiles
       where total_earnings_usd > (
         select total_earnings_usd from wrapped_profiles where wallet_address = ${wallet}
+      )
+      or (
+        total_earnings_usd = (
+          select total_earnings_usd from wrapped_profiles where wallet_address = ${wallet}
+        )
+        and updated_at < (
+          select updated_at from wrapped_profiles where wallet_address = ${wallet}
+        )
       )
     `) as Array<{ higher: number }>;
     const rank = (rankRow?.higher ?? 0) + 1;
