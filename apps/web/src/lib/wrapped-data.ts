@@ -26,6 +26,13 @@ export type WrappedProfile = {
   pleaseBroEarnings: number;
   unclaimed: number;
   bestDay: { date: string; usd: number } | null;
+  dailyEarnings: { date: string; usd: number }[];
+  claimCount: number;
+  longestStreakDays: number;
+  // Live-computed, not cached with payload - see backend getRank().
+  rank: number;
+  totalUsers: number;
+  percentile: number;
   creatorFeesStatus: FeesFetchStatus;
   beneficiaryFeesStatus: FeesFetchStatus;
 };
@@ -61,6 +68,9 @@ type ApiWrappedCacheRow = {
     };
     claimable: { unclaimed: number };
     bestDay: { date: string; usd: number } | null;
+    dailyEarnings: { date: string; usd: number }[];
+    claimCount: number;
+    longestStreakDays: number;
     summary: { tokensLaunched: number; hasActivity: boolean };
     meta: {
       creatorFeesStatus: FeesFetchStatus;
@@ -68,6 +78,9 @@ type ApiWrappedCacheRow = {
     };
   };
   updatedAt: string;
+  rank: number;
+  totalUsers: number;
+  percentile: number;
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
@@ -88,6 +101,12 @@ function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     pleaseBroEarnings: payload.earnings.pleaseBroEarnings,
     unclaimed: payload.claimable.unclaimed,
     bestDay: payload.bestDay,
+    dailyEarnings: payload.dailyEarnings,
+    claimCount: payload.claimCount,
+    longestStreakDays: payload.longestStreakDays,
+    rank: row.rank,
+    totalUsers: row.totalUsers,
+    percentile: row.percentile,
     creatorFeesStatus: payload.meta.creatorFeesStatus,
     beneficiaryFeesStatus: payload.meta.beneficiaryFeesStatus,
   };

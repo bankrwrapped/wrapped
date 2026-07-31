@@ -8,12 +8,13 @@ import {
   SceneLaunched,
   ScenePleaseBro,
   SceneSummary,
+  SceneTimeline,
   SceneUnclaimed,
 } from "@/components/wrapped/scenes";
 import { cn } from "@/lib/utils";
 import type { WrappedProfile } from "@/lib/wrapped-data";
 
-const DURATIONS = [5200, 4600, 8200, 6800, 8500, 7500, 20000];
+const DURATIONS = [5200, 4600, 8200, 6800, 8500, 7000, 7500, 20000];
 
 /** Ambient light tone per scene: purple -> orange -> balanced. */
 const TONES = [
@@ -22,6 +23,7 @@ const TONES = [
   "from-primary/35 via-background to-accent/10",
   "from-primary/25 via-background to-accent/20",
   "from-accent/35 via-background to-primary/15",
+  "from-accent/32 via-background to-primary/18",
   "from-accent/30 via-background to-primary/20",
   "from-primary/30 via-background to-accent/30",
 ];
@@ -83,8 +85,9 @@ export function WrappedStory({
     <SceneLaunched key="3" p={profile} />,
     <ScenePleaseBro key="4" p={profile} />,
     <SceneEarnings key="5" p={profile} />,
-    <SceneUnclaimed key="6" p={profile} />,
-    <SceneSummary key="7" p={profile} onRestart={onRestart} />,
+    <SceneTimeline key="6" p={profile} />,
+    <SceneUnclaimed key="7" p={profile} />,
+    <SceneSummary key="8" p={profile} onRestart={onRestart} />,
   ];
 
   return (

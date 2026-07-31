@@ -229,6 +229,40 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     ? { date: creator.lifetimeBestDay.date, usd: toUsd(parseAmount(creator.lifetimeBestDay.weth)) }
     : null;
 
+  // Full timeline, already fetched via creator.dailyEarnings for bestDay -
+  // just converting the whole array instead of discarding all but one entry.
+  const dailyEarnings = creator.dailyEarnings.map((d) => ({
+    date: d.date,
+    usd: toUsd(parseAmount(d.weth)),
+  }));
+
+  // Longest run of consecutive calendar days with nonzero earnings. Assumes
+  // dailyEarnings is ascending by date (matches every observed Bankr response).
+  const longestStreakDays = (() => {
+    let longest = 0;
+    let current = 0;
+    let prevDate = null as Date | null;
+    for (const d of dailyEarnings) {
+      if (d.usd <= 0) {
+        current = 0;
+        prevDate = null;
+        continue;
+      }
+      const thisDate = new Date(d.date + "T00:00:00Z");
+      if (prevDate) {
+        const diffDays = Math.round((thisDate.getTime() - prevDate.getTime()) / 86400000);
+        current = diffDays === 1 ? current + 1 : 1;
+      } else {
+        current = 1;
+      }
+      longest = Math.max(longest, current);
+      prevDate = thisDate;
+    }
+    return longest;
+  })();
+
+  const claimCount = creator.totals.claimCount;
+
   const total = creatorEarnings + pleaseBroEarnings;
   const bothFeesOk =
     creatorResult.status === "ok" && beneficiaryResult.status === "ok";
@@ -261,6 +295,9 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     },
     claimable: { unclaimed },
     bestDay,
+    dailyEarnings,
+    claimCount,
+    longestStreakDays,
     summary: { tokensLaunched: creator.tokens.length, hasActivity },
     meta: {
       creatorFeesStatus: creatorResult.status,

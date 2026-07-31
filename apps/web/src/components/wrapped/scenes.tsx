@@ -156,6 +156,45 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
   );
 }
 
+export function SceneTimeline({ p }: { p: WrappedProfile }) {
+  const days = p.dailyEarnings.filter((d) => d.usd > 0);
+  const max = Math.max(1, ...days.map((d) => d.usd));
+  return (
+    <div className="w-full space-y-6">
+      <div className="text-center">
+        <Kicker>Your earning journey</Kicker>
+        <h2 className="animate-scene-in font-display text-3xl font-extrabold sm:text-4xl">
+          Built up over time
+        </h2>
+      </div>
+      {days.length > 0 ? (
+        <div className="glass animate-rise flex h-40 items-end gap-[2px] overflow-hidden rounded-2xl p-3" style={{ animationDelay: "150ms" }}>
+          {days.map((d, i) => (
+            <div key={d.date} title={d.date + ": " + formatUsd(d.usd)}
+              className="flex-1 rounded-t bg-gradient-to-t from-primary to-accent"
+              style={{ height: Math.max(4, (d.usd / max) * 100) + "%" }}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="animate-rise glass rounded-2xl px-4 py-6 text-center text-sm text-muted-foreground">
+          Not enough history yet to chart a trend.
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="glass animate-rise rounded-2xl p-4 text-center" style={{ animationDelay: "300ms" }}>
+          <p className="font-display text-2xl font-extrabold text-accent">{p.claimCount}</p>
+          <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Times claimed</p>
+        </div>
+        <div className="glass animate-rise rounded-2xl p-4 text-center" style={{ animationDelay: "380ms" }}>
+          <p className="font-display text-2xl font-extrabold text-accent">{p.longestStreakDays}</p>
+          <p className="text-[11px] uppercase tracking-widest text-muted-foreground">Day streak</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SceneUnclaimed({ p }: { p: WrappedProfile }) {
   const [copied, setCopied] = useState(false);
   const command = "claim all my rewards";
@@ -230,6 +269,11 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
                 style={{ animationDelay: "220ms" }}
               >
                 Most Vouched-For &middot; {p.pleaseBro.length} Please Bro token{p.pleaseBro.length === 1 ? "" : "s"}
+              </p>
+            ) : null}
+            {p.totalUsers > 1 ? (
+              <p className="animate-rise text-xs font-semibold uppercase tracking-widest text-muted-foreground" style={{ animationDelay: "260ms" }}>
+                Top {p.percentile}% of Bankr earners
               </p>
             ) : null}
           </div>

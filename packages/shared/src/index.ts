@@ -142,6 +142,14 @@ export interface WrappedPayload {
   // Best single day of creator earnings, converted to USD. null if Bankr
   // never reported one (e.g. no earnings history at all).
   bestDay: { date: string; usd: number } | null;
+  // Full day-by-day creator earnings timeline (USD), ascending by date, as
+  // returned by Bankr's dailyEarnings window - already fetched for bestDay,
+  // previously discarded.
+  dailyEarnings: { date: string; usd: number }[];
+  // Total number of times this wallet has claimed creator fees (lifetime).
+  claimCount: number;
+  // Longest run of consecutive calendar days with nonzero creator earnings.
+  longestStreakDays: number;
   summary: {
     tokensLaunched: number;
     // False only when every activity signal is genuinely zero AND both fee
