@@ -107,19 +107,67 @@ async function fetchBeneficiaryFees(
 
 // Free, unauthenticated ETH/USD price feed - Bankr's own price data requires
 // an API key + paid Club subscription, so this covers the public wrapped flow.
-async function fetchEthUsdPrice(): Promise<number> {
-  console.log("[wrappedService] fetchEthUsdPrice: start");
+//
+// Fragility fix: previously a single-source fetch that threw on any hiccup,
+// taking down the ENTIRE /api/wrapped/:handle request even when everything
+// else (fee data) succeeded. Now: try primary, fall back to a second
+// independent source, and as a last resort reuse the most recent
+// successfully-fetched price (in-memory, not persisted) rather than fail
+// outright. Only throws if primary AND secondary fail AND no prior price
+// has ever been cached in this process's lifetime (e.g. first request ever
+// happens during a simultaneous outage of both sources - rare).
+let lastKnownEthUsdPrice: number | null = null;
+
+async function fetchFromDefiLlama(): Promise<number> {
   const res = await fetch("https://coins.llama.fi/prices/current/coingecko:ethereum", {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error("price fetch failed: " + res.status);
+  if (!res.ok) throw new Error("DefiLlama price fetch failed: " + res.status);
   const data = (await res.json()) as {
     coins?: { "coingecko:ethereum"?: { price?: number } };
   };
   const price = data.coins?.["coingecko:ethereum"]?.price;
-  if (typeof price !== "number") throw new Error("unexpected price response shape");
-  console.log("[wrappedService] fetchEthUsdPrice: done, price=" + price);
+  if (typeof price !== "number") throw new Error("unexpected DefiLlama response shape");
   return price;
+}
+
+async function fetchFromCoinbase(): Promise<number> {
+  const res = await fetch("https://api.coinbase.com/v2/prices/ETH-USD/spot", {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error("Coinbase price fetch failed: " + res.status);
+  const data = (await res.json()) as { data?: { amount?: string } };
+  const price = data.data?.amount ? parseFloat(data.data.amount) : NaN;
+  if (!Number.isFinite(price)) throw new Error("unexpected Coinbase response shape");
+  return price;
+}
+
+async function fetchEthUsdPrice(): Promise<number> {
+  console.log("[wrappedService] fetchEthUsdPrice: start");
+  try {
+    const price = await fetchFromDefiLlama();
+    lastKnownEthUsdPrice = price;
+    console.log("[wrappedService] fetchEthUsdPrice: done via DefiLlama, price=" + price);
+    return price;
+  } catch (err) {
+    console.log("[wrappedService] fetchEthUsdPrice: DefiLlama failed, trying Coinbase, err=" + String(err));
+  }
+
+  try {
+    const price = await fetchFromCoinbase();
+    lastKnownEthUsdPrice = price;
+    console.log("[wrappedService] fetchEthUsdPrice: done via Coinbase fallback, price=" + price);
+    return price;
+  } catch (err) {
+    console.log("[wrappedService] fetchEthUsdPrice: Coinbase also failed, err=" + String(err));
+  }
+
+  if (lastKnownEthUsdPrice !== null) {
+    console.log("[wrappedService] fetchEthUsdPrice: both sources down, reusing last known price=" + lastKnownEthUsdPrice);
+    return lastKnownEthUsdPrice;
+  }
+
+  throw new Error("ETH/USD price unavailable - both sources failed and no cached price exists");
 }
 
 function parseAmount(raw: string | undefined | null): number {
@@ -211,18 +259,28 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     };
   });
 
-  const creatorEarnings = toUsd(parseAmount(creator.totals.claimedWeth));
+  // "Earnings" now means everything this wallet has generated as a fee
+  // beneficiary - claimed AND still-claimable - not just what's been
+  // withdrawn. claimableWeth is a live on-chain read per Bankr's own docs
+  // (not a cached/windowed estimate), so claimed+claimable is the most
+  // accurate "total value generated" figure available from this API.
+  // SceneUnclaimed still shows the claimable portion separately as an
+  // action item ("go get this"), it's just no longer excluded from the
+  // headline earnings total.
+  const creatorClaimedWeth = parseAmount(creator.totals.claimedWeth);
+  const creatorClaimableWeth = parseAmount(creator.totals.claimableWeth);
+  const creatorEarnings = toUsd(creatorClaimedWeth + creatorClaimableWeth);
+
   const pleaseBroClaimedWeth = beneficiary.tokens.reduce(
     (sum, t) => sum + wethAmount(t, "claimed"),
     0
   );
-  const pleaseBroEarnings = toUsd(pleaseBroClaimedWeth);
-
-  const creatorClaimableWeth = parseAmount(creator.totals.claimableWeth);
   const pleaseBroClaimableWeth = beneficiary.tokens.reduce(
     (sum, t) => sum + wethAmount(t, "claimable"),
     0
   );
+  const pleaseBroEarnings = toUsd(pleaseBroClaimedWeth + pleaseBroClaimableWeth);
+
   const unclaimed = toUsd(creatorClaimableWeth + pleaseBroClaimableWeth);
 
   // Full timeline first - bestDay is derived from this SAME array below,

@@ -325,6 +325,9 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
       >
         Wrap another builder
       </button>
+      <p className="text-center text-[11px] text-muted-foreground/70">
+        Data sourced directly from Bankr's public API.
+      </p>
     </div>
   );
 }

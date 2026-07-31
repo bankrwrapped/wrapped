@@ -10,8 +10,12 @@ export type Archetype = {
  * distribution data yet. Expect to tune these once run against real wallets.
  */
 export function getArchetype(p: WrappedProfile): Archetype {
+  // p.creatorEarnings/p.pleaseBroEarnings now include BOTH claimed and
+  // still-claimable amounts (see wrappedService.ts) - totalEarned is
+  // already the full lifetime figure, so nothing should add p.unclaimed
+  // on top of it again.
   const totalEarned = p.creatorEarnings + p.pleaseBroEarnings;
-  const totalLifetime = totalEarned + p.unclaimed;
+  const claimedOnly = totalEarned - p.unclaimed;
 
   // Whale
   if (totalEarned >= 5000) {
@@ -29,8 +33,9 @@ export function getArchetype(p: WrappedProfile): Archetype {
     };
   }
 
-  // The Sleeper
-  if (p.unclaimed >= 50 && p.unclaimed > totalEarned * 2) {
+  // The Sleeper - compares unclaimed against what's actually been
+  // claimed, not against totalEarned (which now already includes unclaimed).
+  if (p.unclaimed >= 50 && p.unclaimed > claimedOnly * 2) {
     return {
       title: "The Sleeper",
       description: "Real money sitting unclaimed. Time to go get it.",
@@ -48,8 +53,9 @@ export function getArchetype(p: WrappedProfile): Archetype {
     };
   }
 
-  // The Claimer
-  if (totalEarned >= 50 && totalLifetime > 0 && p.unclaimed / totalLifetime < 0.25) {
+  // The Claimer - totalEarned already includes unclaimed, no need to
+  // add it again.
+  if (totalEarned >= 50 && totalEarned > 0 && p.unclaimed / totalEarned < 0.25) {
     return {
       title: "The Claimer",
       description: "You earn it, you claim it. No fees left behind.",
