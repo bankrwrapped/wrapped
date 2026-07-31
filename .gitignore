@@ -30,3 +30,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Windows/NTFS metadata (appears when files are downloaded/synced on a
+# Windows-mounted drive) - never real source content
+*:Zone.Identifier
+
+# Turborepo build cache
+.turbo/

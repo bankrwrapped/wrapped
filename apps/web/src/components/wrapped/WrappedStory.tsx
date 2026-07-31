@@ -14,7 +14,10 @@ import {
 import { cn } from "@/lib/utils";
 import type { WrappedProfile } from "@/lib/wrapped-data";
 
-const DURATIONS = [5200, 4600, 8200, 6800, 8500, 7000, 7500, 20000];
+// ScenePleaseBro (index 3) bumped 6800ms -> 7300ms: it gained a counter
+// beat (matching SceneLaunched's rhythm) without its duration being
+// adjusted at the time - the extra 500ms accounts for the new beat.
+const DURATIONS = [5200, 4600, 8200, 7300, 8500, 7000, 7500, 20000];
 
 /** Ambient light tone per scene: purple -> orange -> balanced. */
 const TONES = [

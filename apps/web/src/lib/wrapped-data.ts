@@ -89,6 +89,15 @@ function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
     return url.replace("_normal.", "_400x400.");
   }
+  // Farcaster/Warpcast avatars go through Cloudflare Images with a named
+  // variant as the final path segment (e.g. "/rectcrop3"). "original" is
+  // confirmed as the standard full-resolution variant for this exact CF
+  // Images account (imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/...) across
+  // Neynar's API docs, Farcaster's own Mini Apps docs, and Farcaster's blog.
+  if (url.includes("imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/")) {
+    const lastSlash = url.lastIndexOf("/");
+    return url.slice(0, lastSlash + 1) + "original";
+  }
   return url;
 }
 
