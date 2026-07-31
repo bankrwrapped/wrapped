@@ -224,6 +224,14 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
             <p className="animate-rise text-sm text-muted-foreground" style={{ animationDelay: "180ms" }}>
               {archetype.description}
             </p>
+            {p.pleaseBro.length > 0 ? (
+              <p
+                className="animate-rise glass mx-auto mt-1 inline-block rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-accent"
+                style={{ animationDelay: "220ms" }}
+              >
+                Most Vouched-For &middot; {p.pleaseBro.length} Please Bro token{p.pleaseBro.length === 1 ? "" : "s"}
+              </p>
+            ) : null}
           </div>
           <div className="grid grid-cols-3 gap-3 pt-1">
             {[
