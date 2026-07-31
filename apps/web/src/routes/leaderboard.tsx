@@ -35,13 +35,22 @@ function LeaderboardPage() {
       <Link to="/" className="mb-6 flex w-fit items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> Back
       </Link>
-      <h1 className="mb-6 font-display text-3xl font-extrabold sm:text-4xl">
-        Top Bankr Earners
+      <h1 className="mb-2 font-display text-3xl font-extrabold sm:text-4xl">
+        Top Earners on Bankr Wrapped
       </h1>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Ranked by wallets that have checked their Wrapped so far.{" "}
+        <Link to="/" className="text-accent underline-offset-4 hover:underline">
+          Check yours to climb the board
+        </Link>
+        .
+      </p>
       {entries === null ? (
         <p className="text-sm text-muted-foreground">Loading&hellip;</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No data available right now.</p>
+        <p className="text-sm text-muted-foreground">
+          No one's checked their Wrapped yet &mdash; be the first.
+        </p>
       ) : (
         <ol className="space-y-2">
           {entries.map((e, i) => (

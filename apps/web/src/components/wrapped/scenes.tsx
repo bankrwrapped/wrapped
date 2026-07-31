@@ -157,8 +157,12 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
 }
 
 export function SceneTimeline({ p }: { p: WrappedProfile }) {
-  const days = p.dailyEarnings.filter((d) => d.usd > 0);
-  const max = Math.max(1, ...days.map((d) => d.usd));
+  // Render every day in the window, not just nonzero ones - a single
+  // active day among many empty ones should look like a spike on a
+  // timeline, not a solid block filling the whole chart.
+  const allDays = p.dailyEarnings;
+  const activeDays = allDays.filter((d) => d.usd > 0);
+  const max = Math.max(1, ...allDays.map((d) => d.usd));
   return (
     <div className="w-full space-y-6">
       <div className="text-center">
@@ -167,11 +171,15 @@ export function SceneTimeline({ p }: { p: WrappedProfile }) {
           Built up over time
         </h2>
       </div>
-      {days.length > 0 ? (
+      {activeDays.length > 0 ? (
         <div className="glass animate-rise flex h-40 items-end gap-[2px] overflow-hidden rounded-2xl p-3" style={{ animationDelay: "150ms" }}>
-          {days.map((d, i) => (
+          {allDays.map((d) => (
             <div key={d.date} title={d.date + ": " + formatUsd(d.usd)}
-              className="flex-1 rounded-t bg-gradient-to-t from-primary to-accent"
+              className={
+                d.usd > 0
+                  ? "flex-1 rounded-t bg-gradient-to-t from-primary to-accent"
+                  : "flex-1 rounded-t bg-foreground/10"
+              }
               style={{ height: Math.max(4, (d.usd / max) * 100) + "%" }}
             />
           ))}

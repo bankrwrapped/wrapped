@@ -225,16 +225,21 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   );
   const unclaimed = toUsd(creatorClaimableWeth + pleaseBroClaimableWeth);
 
-  const bestDay = creator.lifetimeBestDay
-    ? { date: creator.lifetimeBestDay.date, usd: toUsd(parseAmount(creator.lifetimeBestDay.weth)) }
-    : null;
-
-  // Full timeline, already fetched via creator.dailyEarnings for bestDay -
-  // just converting the whole array instead of discarding all but one entry.
+  // Full timeline first - bestDay is derived from this SAME array below,
+  // not from Bankr's own lifetimeBestDay field. Confirmed via raw API
+  // inspection that lifetimeBestDay can reference a date outside the
+  // dailyEarnings window we actually fetch (e.g. lifetimeDays: 1 while
+  // dailyEarnings spans ~90 days) - deriving our own keeps the "best day"
+  // callout consistent with the chart we render right next to it.
   const dailyEarnings = creator.dailyEarnings.map((d) => ({
     date: d.date,
     usd: toUsd(parseAmount(d.weth)),
   }));
+
+  const bestDay = dailyEarnings.reduce(
+    (best, d) => (d.usd > (best?.usd ?? 0) ? d : best),
+    null as { date: string; usd: number } | null
+  );
 
   // Longest run of consecutive calendar days with nonzero earnings. Assumes
   // dailyEarnings is ascending by date (matches every observed Bankr response).
