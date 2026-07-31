@@ -85,13 +85,20 @@ type ApiWrappedCacheRow = {
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
+function upscaleAvatar(url: string): string {
+  if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
+    return url.replace("_normal.", "_400x400.");
+  }
+  return url;
+}
+
 function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
   const { payload } = row;
   return {
     handle: payload.user.handle,
     displayName: payload.user.displayName,
     platform: payload.user.platform,
-    avatar: payload.user.avatar,
+    avatar: upscaleAvatar(payload.user.avatar),
     wallet: payload.user.wallet,
     tokensLaunched: payload.summary.tokensLaunched,
     hasActivity: payload.summary.hasActivity,
@@ -148,7 +155,7 @@ export async function searchHandles(query: string): Promise<SearchSuggestion[]> 
     const res = await fetch(`${API_URL}/api/search?query=${encodeURIComponent(trimmed)}`);
     if (!res.ok) return [];
     const data: { results: SearchSuggestion[] } = await res.json();
-    return data.results ?? [];
+    return (data.results ?? []).map((s) => ({ ...s, profileImageUrl: upscaleAvatar(s.profileImageUrl) }));
   } catch {
     return [];
   }
@@ -189,7 +196,7 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
     const res = await fetch(`${API_URL}/api/leaderboard`);
     if (!res.ok) return [];
     const data: { entries: LeaderboardEntry[] } = await res.json();
-    return data.entries ?? [];
+    return (data.entries ?? []).map((e) => ({ ...e, avatarUrl: upscaleAvatar(e.avatarUrl) }));
   } catch {
     return [];
   }

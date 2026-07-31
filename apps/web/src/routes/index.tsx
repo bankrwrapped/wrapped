@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Search, Trophy, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { BuildingWrappedState } from "@/components/wrapped/BuildingWrappedState";
@@ -200,7 +200,7 @@ function Index() {
           >
             <div ref={searchBoxRef} className="relative">
               <div className="glass flex items-center gap-3 rounded-2xl px-4 py-3">
-                <Search className="size-4 text-muted-foreground" />
+                <Search className="size-4 shrink-0 text-muted-foreground" />
                 <input
                   value={handle}
                   onChange={(e) => onHandleInputChange(e.target.value)}
@@ -212,6 +212,16 @@ function Index() {
                   autoComplete="off"
                   className="w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
                 />
+                {handle.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onHandleInputChange("")}
+                    aria-label="Clear"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
               </div>
 
               {showSuggestions && suggestions.length > 0 && (
@@ -250,6 +260,9 @@ function Index() {
           <p className="animate-rise text-xs text-muted-foreground" style={{ animationDelay: "260ms" }}>
             "Please Bro" tokens are ones where someone redirected their creator fees to you.
           </p>
+          <p className="animate-rise text-xs text-muted-foreground" style={{ animationDelay: "270ms" }}>
+            Shows your activity on Bankr specifically &mdash; not other launchpads.
+          </p>
 
           {error && (
             <p className="animate-rise text-sm text-destructive" role="alert">
@@ -259,27 +272,15 @@ function Index() {
 
           <Link
             to="/leaderboard"
-            className="animate-rise block text-sm text-muted-foreground underline-offset-4 hover:underline"
+            className="glass animate-rise mx-auto flex w-fit items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors hover:border-accent/40"
             style={{ animationDelay: "280ms" }}
           >
-            View leaderboard
+            <Trophy className="size-4 text-accent" /> View leaderboard
           </Link>
         </div>
       </main>
     );
   }
 
-  return (
-    <div className="relative min-h-screen">
-      <video
-        className="pointer-events-none fixed inset-0 size-full object-cover opacity-20"
-        src="/bankr-ambient.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-      />
-      {content}
-    </div>
-  );
+  return content;
 }

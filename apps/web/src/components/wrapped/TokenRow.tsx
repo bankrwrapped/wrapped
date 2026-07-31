@@ -1,22 +1,19 @@
-import { cn } from "@/lib/utils";
 import { CHAIN_LABEL, formatUsd, type TokenEntry } from "@/lib/wrapped-data";
-const chainDot: Record<TokenEntry["chain"], string> = {
-  base: "bg-chain-base",
-  robinhood: "bg-chain-robinhood",
-};
+import { tokenHue, tokenInitials } from "@/lib/token-badge";
 export function TokenRow({ token, index }: { token: TokenEntry; index: number }) {
+  const hue = tokenHue(token.tokenAddress);
   return (
     <li
       className="glass flex items-center gap-3 rounded-2xl px-4 py-3 animate-rise"
       style={{ animationDelay: (300 + index * 110) + "ms" }}
     >
       <span
-        className={cn(
-          "size-8 shrink-0 rounded-full opacity-90 ring-1 ring-border",
-          chainDot[token.chain],
-        )}
+        className="flex size-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ring-1 ring-border"
+        style={{ backgroundColor: `hsl(${hue}, 60%, 38%)` }}
         aria-hidden
-      />
+      >
+        {tokenInitials(token.symbol)}
+      </span>
       <div className="min-w-0 flex-1">
         <p className="truncate font-display text-base font-semibold">{token.name}</p>
         <p className="text-xs text-muted-foreground">

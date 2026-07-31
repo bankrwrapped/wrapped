@@ -273,6 +273,40 @@ async function fetchHistoricalEthPrices(dates: string[]): Promise<Record<string,
   }
 }
 
+// Bankr's Clanker-sourced token entries have been observed reporting the
+// EXACT SAME claimable+claimed amounts (down to the raw string) across
+// multiple genuinely different tokens for the same wallet - e.g. three
+// unrelated tokens all showing "0.064711" WETH claimable, which then also
+// gets triple-counted into the wallet's aggregate totals (real example:
+// $576 "unclaimed" = 3 x $192, three token rows all showing an identical
+// "$192 earned"). Doppler tokens use a clean per-pool read and have never
+// shown this pattern - only Clanker tokens have, so this is scoped to
+// source === "clanker" only. When 2+ Clanker tokens for the same wallet
+// share an identical claimable+claimed fingerprint, keep the first
+// occurrence's real value and zero out the rest - both for per-token
+// display and for the wallet-level totals, which we now compute ourselves
+// from this deduped list rather than trusting creator.totals directly,
+// since that total appears to just sum the same duplicated per-token data.
+type ClankerDedupeEntry = {
+  source: string;
+  claimable: { token0: string; token1: string };
+  claimed: { token0: string; token1: string; count: number };
+};
+
+function dedupeClankerAmounts(tokens: ClankerDedupeEntry[]): boolean[] {
+  const seen = new Set<string>();
+  return tokens.map((t) => {
+    if (t.source !== "clanker") return true; // never dedupe Doppler tokens
+    const key = t.claimable.token0 + "|" + t.claimable.token1 + "|" + t.claimed.token0 + "|" + t.claimed.token1;
+    if (seen.has(key)) {
+      console.warn("[wrappedService] dedupeClankerAmounts: dropping duplicate Clanker fee entry, key=" + key);
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayload> {
   console.log("[wrappedService] fetchFromBankr: start, wallet=" + match.evmAddress);
   const [creatorResult, beneficiaryResult, ethUsd] = await Promise.all([
@@ -286,8 +320,11 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
 
   const toUsd = (weth: number) => weth * ethUsd;
 
-  const launchedTokens: WrappedTokenEntry[] = creator.tokens.map((t) => {
-    const feeWeth = wethAmount(t, "claimable") + wethAmount(t, "claimed");
+  const creatorKeep = dedupeClankerAmounts(creator.tokens);
+  const pleaseBroKeep = dedupeClankerAmounts(beneficiary.tokens);
+
+  const launchedTokens: WrappedTokenEntry[] = creator.tokens.map((t, i) => {
+    const feeWeth = creatorKeep[i] ? wethAmount(t, "claimable") + wethAmount(t, "claimed") : 0;
     return {
       tokenAddress: t.tokenAddress,
       name: t.name,
@@ -297,8 +334,8 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     };
   });
 
-  const pleaseBroTokens: WrappedTokenEntry[] = beneficiary.tokens.map((t) => {
-    const feeWeth = wethAmount(t, "claimable") + wethAmount(t, "claimed");
+  const pleaseBroTokens: WrappedTokenEntry[] = beneficiary.tokens.map((t, i) => {
+    const feeWeth = pleaseBroKeep[i] ? wethAmount(t, "claimable") + wethAmount(t, "claimed") : 0;
     return {
       tokenAddress: t.tokenAddress,
       name: t.name,
@@ -310,22 +347,24 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
 
   // "Earnings" now means everything this wallet has generated as a fee
   // beneficiary - claimed AND still-claimable - not just what's been
-  // withdrawn. claimableWeth is a live on-chain read per Bankr's own docs
-  // (not a cached/windowed estimate), so claimed+claimable is the most
-  // accurate "total value generated" figure available from this API.
-  // SceneUnclaimed still shows the claimable portion separately as an
-  // action item ("go get this"), it's just no longer excluded from the
-  // headline earnings total.
-  const creatorClaimedWeth = parseAmount(creator.totals.claimedWeth);
-  const creatorClaimableWeth = parseAmount(creator.totals.claimableWeth);
+  // withdrawn. Computed from the deduped per-token list ourselves rather
+  // than trusting creator.totals - see dedupeClankerAmounts above.
+  const creatorClaimedWeth = creator.tokens.reduce(
+    (sum, t, i) => sum + (creatorKeep[i] ? wethAmount(t, "claimed") : 0),
+    0
+  );
+  const creatorClaimableWeth = creator.tokens.reduce(
+    (sum, t, i) => sum + (creatorKeep[i] ? wethAmount(t, "claimable") : 0),
+    0
+  );
   const creatorEarnings = toUsd(creatorClaimedWeth + creatorClaimableWeth);
 
   const pleaseBroClaimedWeth = beneficiary.tokens.reduce(
-    (sum, t) => sum + wethAmount(t, "claimed"),
+    (sum, t, i) => sum + (pleaseBroKeep[i] ? wethAmount(t, "claimed") : 0),
     0
   );
   const pleaseBroClaimableWeth = beneficiary.tokens.reduce(
-    (sum, t) => sum + wethAmount(t, "claimable"),
+    (sum, t, i) => sum + (pleaseBroKeep[i] ? wethAmount(t, "claimable") : 0),
     0
   );
   const pleaseBroEarnings = toUsd(pleaseBroClaimedWeth + pleaseBroClaimableWeth);
@@ -387,11 +426,17 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   // Creator claims only previously - Please Bro claims (beneficiary.tokens[]
   // each carry their own claimed.count) were silently excluded, undercounting
   // total claim activity now that earnings itself includes both sources.
-  const pleaseBroClaimCount = beneficiary.tokens.reduce(
-    (sum, t) => sum + (t.claimed?.count ?? 0),
+  // Uses the same dedup as above - creator.totals.claimCount would also
+  // inherit the duplicate-Clanker-entry inflation otherwise.
+  const creatorClaimCount = creator.tokens.reduce(
+    (sum, t, i) => sum + (creatorKeep[i] ? (t.claimed?.count ?? 0) : 0),
     0
   );
-  const claimCount = creator.totals.claimCount + pleaseBroClaimCount;
+  const pleaseBroClaimCount = beneficiary.tokens.reduce(
+    (sum, t, i) => sum + (pleaseBroKeep[i] ? (t.claimed?.count ?? 0) : 0),
+    0
+  );
+  const claimCount = creatorClaimCount + pleaseBroClaimCount;
 
   const total = creatorEarnings + pleaseBroEarnings;
   const bothFeesOk =

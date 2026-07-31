@@ -120,8 +120,18 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <div className="relative min-h-screen">
+        <video
+          className="pointer-events-none fixed inset-0 size-full object-cover opacity-20"
+          src="/bankr-ambient.mp4"
+          autoPlay
+          muted
+          loop
+          playsInline
+        />
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+      </div>
     </QueryClientProvider>
   );
 }

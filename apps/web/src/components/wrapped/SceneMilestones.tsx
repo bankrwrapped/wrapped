@@ -78,13 +78,14 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
 
           {showVolume && (
             <div key="volume" className="animate-scene-in space-y-3">
-              <p className="font-display text-4xl font-extrabold sm:text-5xl">
+              <div className="mx-auto h-px w-10 bg-foreground/25" />
+              <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">
+                Trading Volume Across All Chains
+              </p>
+              <p className="animate-rise font-display text-4xl font-extrabold sm:text-5xl" style={{ animationDelay: "80ms" }}>
                 <span className="text-gradient">
                   <Counter value={5.01} format={(v) => `$${v.toFixed(2)}B+`} duration={2500} />
                 </span>
-              </p>
-              <p className="animate-rise text-sm uppercase tracking-[0.3em] text-muted-foreground">
-                Trading Volume Across All Chains
               </p>
             </div>
           )}
@@ -106,11 +107,12 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
 
           {showPaidOut && (
             <div key="paidOut" className="animate-scene-in space-y-3">
-              <p className="font-display text-3xl font-extrabold text-accent sm:text-4xl">
-                <Counter value={20.19} format={(v) => `$${v.toFixed(2)}M+`} duration={2200} />
-              </p>
-              <p className="animate-rise text-sm uppercase tracking-[0.3em] text-muted-foreground">
+              <div className="mx-auto h-px w-10 bg-foreground/25" />
+              <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">
                 Paid Out to Builders &amp; Creators
+              </p>
+              <p className="animate-rise font-display text-3xl font-extrabold text-accent sm:text-4xl" style={{ animationDelay: "80ms" }}>
+                <Counter value={20.19} format={(v) => `$${v.toFixed(2)}M+`} duration={2200} />
               </p>
             </div>
           )}
