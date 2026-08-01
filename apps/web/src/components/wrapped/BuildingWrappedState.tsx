@@ -70,6 +70,15 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/85 via-background/70 to-background/90" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
 
+      <div className="absolute left-5 top-5 z-20 flex items-center gap-2.5">
+        <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
+          <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+        </div>
+        <span className="font-display text-sm font-bold tracking-tight">
+          Bankr <span className="text-gradient">Wrapped</span>
+        </span>
+      </div>
+
       <div className="relative z-10 w-full max-w-md space-y-8">
         {/* Avatar anchor - the visual "this is about you" moment. Falls
             back to an initial-letter badge if we don't have an avatar
@@ -81,6 +90,14 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
           className="relative mx-auto size-20"
         >
           <div className="absolute inset-0 animate-glow-pulse rounded-full bg-primary/40 blur-xl" />
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            className="absolute -inset-1.5 rounded-full"
+            style={{
+              background: "conic-gradient(from 0deg, transparent, var(--color-accent), transparent 40%)",
+            }}
+          />
           <div className="glass relative flex size-20 items-center justify-center overflow-hidden rounded-full">
             {avatarUrl ? (
               <img src={avatarUrl} alt="" className="size-full object-cover" />

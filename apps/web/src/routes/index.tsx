@@ -22,13 +22,13 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Bankr Wrapped \u2014 Your Launchpad Year, Animated" },
+      { title: "Bankr Wrapped \u00B7 Your Launchpad Year, Animated" },
       {
         name: "description",
         content:
           "A cinematic recap of your Bankr journey: tokens launched, Please Bro tokens, creator earnings and unclaimed rewards.",
       },
-      { property: "og:title", content: "Bankr Wrapped \u2014 Your Launchpad Year, Animated" },
+      { property: "og:title", content: "Bankr Wrapped \u00B7 Your Launchpad Year, Animated" },
       {
         property: "og:description",
         content:

@@ -385,7 +385,7 @@ export function SceneUnclaimed({ p }: { p: WrappedProfile }) {
 // Set once the domain is live - the "Check yours" CTA line only appears
 // in the share text when this is non-empty, so adding it later is a
 // one-line change with no other code to touch.
-const SHARE_URL = "";
+const SHARE_URL = "https://bankrwrapped.com";
 
 async function captureCard(node: HTMLElement): Promise<Blob | null> {
   const dataUrl = await toPng(node, { pixelRatio: 2, cacheBust: true });
@@ -490,7 +490,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
             actually establishes it as a designed artifact, not a screenshot
             of raw data. */}
         <div className="relative h-32 w-full overflow-hidden sm:h-40">
-          <img src="/banner.jpg" alt="" className="size-full object-cover" />
+          <img src="/banner.jpg" alt="" crossOrigin="anonymous" className="size-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
           <div className="glass absolute left-4 top-4 flex items-center gap-2 rounded-full px-3 py-1.5">
             <div className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full">
@@ -509,6 +509,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
             transition={{ type: "spring", stiffness: 130, damping: 14, delay: 0.15 }}
             src={p.avatar}
             alt=""
+            crossOrigin="anonymous"
             className="glass mx-auto -mt-16 size-20 rounded-full object-cover"
           />
 

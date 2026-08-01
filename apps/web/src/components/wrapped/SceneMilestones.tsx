@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { HeaderActions } from "@/components/wrapped/HeaderActions";
+import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
 import { ScrambleReveal } from "@/components/wrapped/ScrambleReveal";
 
 // Each phase is now its OWN full screen that displaces the last, rather
@@ -78,25 +80,21 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
-      <img
-        src="/liquid-glass-bg.jpg"
-        alt=""
-        aria-hidden
-        className="pointer-events-none absolute inset-0 size-full object-cover"
-      />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/80 via-background/55 to-background/85" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/25 via-transparent to-accent/20" />
+      <LiquidGlassBackdrop />
 
       <motion.div
         {...chapterMotion}
-        className="absolute left-5 top-5 z-20 flex items-center gap-2.5"
+        className="absolute left-5 right-5 top-5 z-20 flex items-center justify-between gap-2.5"
       >
-        <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
-          <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+        <div className="flex items-center gap-2.5">
+          <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
+            <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+          </div>
+          <span className="font-display text-sm font-bold tracking-tight">
+            Bankr <span className="text-gradient">Wrapped</span>
+          </span>
         </div>
-        <span className="font-display text-sm font-bold tracking-tight">
-          Bankr <span className="text-gradient">Wrapped</span>
-        </span>
+        <HeaderActions />
       </motion.div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center px-5 pb-8 pt-24 text-center">

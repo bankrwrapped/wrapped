@@ -7,7 +7,7 @@ import { fetchLeaderboard, formatEth, type LeaderboardEntry } from "@/lib/wrappe
 export const Route = createFileRoute("/leaderboard")({
   head: () => ({
     meta: [
-      { title: "Bankr Wrapped \u2014 Top Earners" },
+      { title: "Bankr Wrapped \u00B7 Top Earners" },
       {
         name: "description",
         content: "The top 20 Bankr creators by total earnings.",

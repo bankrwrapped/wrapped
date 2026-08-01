@@ -6,7 +6,7 @@ import { AboutContent } from "@/components/wrapped/AboutContent";
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
-      { title: "About \u2014 Bankr Wrapped" },
+      { title: "About \u00B7 Bankr Wrapped" },
       { name: "description", content: "What Bankr Wrapped is, and who built it." },
     ],
   }),
