@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
 import type { WrappedProfile } from "@/lib/wrapped-data";
 
 type Props = {
@@ -27,14 +28,7 @@ export function SceneNoActivityReveal({ profile, onDone }: Props) {
       className="relative flex min-h-screen cursor-pointer flex-col items-center justify-center overflow-hidden px-5 text-center"
       onClick={onDone}
     >
-      <img
-        src="/liquid-glass-bg.jpg"
-        alt=""
-        aria-hidden
-        className="pointer-events-none absolute inset-0 size-full object-cover"
-      />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background/90" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
+      <LiquidGlassBackdrop />
 
       <motion.div
         initial={{ opacity: 0, y: -10 }}

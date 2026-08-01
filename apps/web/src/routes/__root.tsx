@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { Footer } from "@/components/wrapped/Footer";
+import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -16,14 +17,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 function BrandBackdrop() {
   return (
     <>
-      <img
-        src="/liquid-glass-bg.jpg"
-        alt=""
-        aria-hidden
-        className="pointer-events-none fixed inset-0 size-full object-cover"
-      />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background/90" />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
+      <LiquidGlassBackdrop />
       <div className="fixed left-5 top-5 z-20 flex items-center gap-2.5">
         <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
           <img src="/logo.png" alt="Bankr" className="size-full object-cover" />

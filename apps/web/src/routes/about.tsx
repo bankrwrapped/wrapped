@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import { AboutContent } from "@/components/wrapped/AboutContent";
+import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
@@ -16,14 +17,7 @@ export const Route = createFileRoute("/about")({
 function AboutPage() {
   return (
     <div className="relative min-h-screen">
-      <img
-        src="/liquid-glass-bg.jpg"
-        alt=""
-        aria-hidden
-        className="pointer-events-none fixed inset-0 size-full object-cover"
-      />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background/90" />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
+      <LiquidGlassBackdrop />
 
       <div className="relative z-10 mx-auto min-h-screen w-full max-w-xl px-5 py-8">
         <motion.div

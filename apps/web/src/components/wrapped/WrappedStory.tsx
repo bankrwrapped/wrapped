@@ -14,6 +14,7 @@ import {
 } from "@/components/wrapped/scenes";
 import { SceneAboutOutro } from "@/components/wrapped/SceneAboutOutro";
 import { HeaderActions } from "@/components/wrapped/HeaderActions";
+import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
 import type { WrappedProfile } from "@/lib/wrapped-data";
 
 // ScenePleaseBro (index 3) bumped 6800ms -> 7300ms for its added counter
@@ -116,16 +117,7 @@ export function WrappedStory({
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
-      <img
-        src="/liquid-glass-bg.jpg"
-        alt=""
-        aria-hidden
-        className="pointer-events-none fixed inset-0 size-full object-cover"
-      />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background/90" />
-      <div className="pointer-events-none fixed inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
-      <div className="pointer-events-none absolute -left-24 top-1/4 size-[26rem] animate-drift rounded-full bg-primary/20 blur-[130px]" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 size-[24rem] animate-glow-pulse rounded-full bg-accent/15 blur-[130px]" />
+      <LiquidGlassBackdrop />
 
       <div className="relative z-10 mx-auto flex w-full max-w-xl flex-1 flex-col px-5 pb-8 pt-5">
         <div className="flex items-center gap-2.5">
