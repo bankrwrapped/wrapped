@@ -6,7 +6,7 @@ import { Counter } from "@/components/wrapped/Counter";
 import { TopTokensList } from "@/components/wrapped/TopTokensList";
 import { Button } from "@/components/ui/button";
 import { getArchetype } from "@/lib/archetype";
-import { formatUsd, formatUsdFull, type WrappedProfile } from "@/lib/wrapped-data";
+import { formatEth, type WrappedProfile } from "@/lib/wrapped-data";
 
 function Kicker({ children }: { children: React.ReactNode }) {
   return (
@@ -71,7 +71,7 @@ function DataUnavailable() {
 }
 
 export function SceneLaunched({ p }: { p: WrappedProfile }) {
-  const withVolume = p.launched.filter((t) => t.feesEarned > 0);
+  const withFees = p.launched.filter((t) => t.feesEarnedEth > 0);
   const unavailable = p.creatorFeesStatus === "unavailable";
   return (
     <div className="w-full space-y-6">
@@ -87,13 +87,13 @@ export function SceneLaunched({ p }: { p: WrappedProfile }) {
           </p>
         )}
       </div>
-      {unavailable ? <DataUnavailable /> : <TopTokensList tokens={withVolume} />}
+      {unavailable ? <DataUnavailable /> : <TopTokensList tokens={withFees} />}
     </div>
   );
 }
 
 export function ScenePleaseBro({ p }: { p: WrappedProfile }) {
-  const withVolume = p.pleaseBro.filter((t) => t.feesEarned > 0);
+  const withFees = p.pleaseBro.filter((t) => t.feesEarnedEth > 0);
   const unavailable = p.beneficiaryFeesStatus === "unavailable";
   return (
     <div className="w-full space-y-6">
@@ -112,13 +112,13 @@ export function ScenePleaseBro({ p }: { p: WrappedProfile }) {
           Please Bro Tokens
         </h2>
       </div>
-      {unavailable ? <DataUnavailable /> : <TopTokensList tokens={withVolume} />}
+      {unavailable ? <DataUnavailable /> : <TopTokensList tokens={withFees} />}
     </div>
   );
 }
 
 export function SceneEarnings({ p }: { p: WrappedProfile }) {
-  const total = p.creatorEarnings + p.pleaseBroEarnings;
+  const totalEth = p.creatorEarningsEth + p.pleaseBroEarningsEth;
   return (
     <div className="w-full space-y-8 text-center">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -127,7 +127,7 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
             Creator earnings
           </p>
           <p className="mt-2 font-display text-3xl font-extrabold">
-            <Counter value={p.creatorEarnings} delay={300} />
+            <Counter value={p.creatorEarningsEth} delay={300} prefix="" format={formatEth} />
           </p>
         </div>
         <div className="glass animate-rise rounded-3xl p-5" style={{ animationDelay: "220ms" }}>
@@ -135,14 +135,14 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
             Please Bro earnings
           </p>
           <p className="mt-2 font-display text-3xl font-extrabold">
-            <Counter value={p.pleaseBroEarnings} delay={500} />
+            <Counter value={p.pleaseBroEarningsEth} delay={500} prefix="" format={formatEth} />
           </p>
         </div>
       </div>
       <div className="animate-scene-in" style={{ animationDelay: "600ms" }}>
         <Kicker>Total lifetime earnings</Kicker>
         <p className="glow-orange mt-3 rounded-3xl py-2 font-display text-6xl font-extrabold text-gradient sm:text-8xl">
-          <Counter value={total} delay={900} />
+          <Counter value={totalEth} delay={900} prefix="" format={formatEth} />
         </p>
       </div>
       {p.bestDay ? (
@@ -154,7 +154,7 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
             Best day
           </p>
           <p className="mt-1 font-display text-2xl font-extrabold text-accent">
-            <Counter value={p.bestDay.usd} delay={1200} />
+            <Counter value={p.bestDay.eth} delay={1200} prefix="" format={formatEth} />
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
             {new Date(p.bestDay.date).toLocaleDateString("en-US", {
@@ -170,21 +170,12 @@ export function SceneEarnings({ p }: { p: WrappedProfile }) {
 }
 
 export function SceneTimeline({ p }: { p: WrappedProfile }) {
-  // Render every day in the window, not just nonzero ones - a single
-  // active day among many empty ones should look like a spike on a
-  // timeline, not a solid block filling the whole chart.
-  //
-  // For sparse activity (few active days out of a ~90-day window), a full-
-  // width chart drowns the spike in flat bars and reads as "broken" rather
-  // than "sparse but real". Never changes the underlying data - only which
-  // slice of it we display - so bestDay/streak/claimCount stay computed
-  // from the full window regardless.
-  const rawActiveDays = p.dailyEarnings.filter((d) => d.usd > 0);
+  const rawActiveDays = p.dailyEarnings.filter((d) => d.eth > 0);
   const allDays = rawActiveDays.length > 0 && rawActiveDays.length <= 3
     ? p.dailyEarnings.slice(-14)
     : p.dailyEarnings;
-  const activeDays = allDays.filter((d) => d.usd > 0);
-  const max = Math.max(1, ...allDays.map((d) => d.usd));
+  const activeDays = allDays.filter((d) => d.eth > 0);
+  const max = Math.max(1e-9, ...allDays.map((d) => d.eth));
   return (
     <div className="w-full space-y-6">
       <div className="text-center">
@@ -201,13 +192,13 @@ export function SceneTimeline({ p }: { p: WrappedProfile }) {
       ) : activeDays.length > 0 ? (
         <div className="glass animate-rise flex h-40 items-end gap-[2px] overflow-hidden rounded-2xl p-3" style={{ animationDelay: "150ms" }}>
           {allDays.map((d) => (
-            <div key={d.date} title={d.date + ": " + formatUsd(d.usd)}
+            <div key={d.date} title={d.date + ": " + formatEth(d.eth)}
               className={
-                d.usd > 0
+                d.eth > 0
                   ? "flex-1 rounded-t bg-gradient-to-t from-primary to-accent"
                   : "flex-1 rounded-t bg-foreground/10"
               }
-              style={{ height: Math.max(4, (d.usd / max) * 100) + "%" }}
+              style={{ height: Math.max(4, (d.eth / max) * 100) + "%" }}
             />
           ))}
         </div>
@@ -239,7 +230,7 @@ export function SceneUnclaimed({ p }: { p: WrappedProfile }) {
       <div>
         <Kicker>Unclaimed value</Kicker>
         <p className="mt-2 font-display text-6xl font-extrabold text-accent sm:text-7xl">
-          <Counter value={p.unclaimed} delay={250} />
+          <Counter value={p.unclaimedEth} delay={250} prefix="" format={formatEth} />
         </p>
       </div>
       <div className="animate-rise space-y-4" style={{ animationDelay: "400ms" }}>
@@ -271,11 +262,11 @@ export function SceneUnclaimed({ p }: { p: WrappedProfile }) {
 }
 
 export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: () => void }) {
-  const total = p.creatorEarnings + p.pleaseBroEarnings;
+  const totalEth = p.creatorEarningsEth + p.pleaseBroEarningsEth;
   const archetype = getArchetype(p);
   const shareText =
     `I'm "${archetype.title}" on Bankr Wrapped: ` +
-    formatUsdFull(total) +
+    formatEth(totalEth) +
     " earned across " +
     p.tokensLaunched +
     " tokens launched. 🟠🟣";
@@ -314,7 +305,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
           </div>
           <div className="grid grid-cols-3 gap-3 pt-1">
             {[
-              ["Total earned", formatUsd(total)],
+              ["Total earned", formatEth(totalEth)],
               ["Launched", String(p.tokensLaunched)],
               ["Please Bro", String(p.pleaseBro.length)],
             ].map(([label, value], i) => (
@@ -353,7 +344,9 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
         Wrap another builder
       </button>
       <p className="text-center text-[11px] text-muted-foreground/70">
-        Data sourced directly from Bankr's public API.
+        Data sourced directly from Bankr's public API, shown in raw ETH. Some
+        figures may lag or differ slightly from Bankr's own dashboard due to
+        how fee data is reported for certain tokens.
       </p>
     </div>
   );

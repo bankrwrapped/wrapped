@@ -5,9 +5,8 @@ export type TokenEntry = {
   name: string;
   symbol: string;
   chain: Chain;
-  // Actual USD fees earned on this specific token - real for both Doppler
-  // and Clanker sources, never null (see shared package doc-comment).
-  feesEarned: number;
+  // Raw ETH earned on this token - no USD conversion, displayed as-is.
+  feesEarnedEth: number;
 };
 
 export type FeesFetchStatus = "ok" | "unavailable";
@@ -22,14 +21,18 @@ export type WrappedProfile = {
   hasActivity: boolean;
   launched: TokenEntry[];
   pleaseBro: TokenEntry[];
+  // USD fields: internal only, used by archetype.ts thresholds - never displayed.
   creatorEarnings: number;
   pleaseBroEarnings: number;
   unclaimed: number;
-  bestDay: { date: string; usd: number } | null;
-  dailyEarnings: { date: string; usd: number }[];
+  // ETH fields: what's actually shown.
+  creatorEarningsEth: number;
+  pleaseBroEarningsEth: number;
+  unclaimedEth: number;
+  bestDay: { date: string; eth: number } | null;
+  dailyEarnings: { date: string; eth: number }[];
   claimCount: number;
   longestStreakDays: number;
-  // Live-computed, not cached with payload - see backend getRank().
   rank: number;
   totalUsers: number;
   percentile: number;
@@ -37,9 +40,6 @@ export type WrappedProfile = {
   beneficiaryFeesStatus: FeesFetchStatus;
 };
 
-// Thrown specifically when Bankr has no account for this handle at all
-// (404) - distinct from other failures, so the UI can route to the
-// "create an account" state instead of a generic error message.
 export class WrappedNotFoundError extends Error {
   constructor(message: string) {
     super(message);
@@ -47,7 +47,6 @@ export class WrappedNotFoundError extends Error {
   }
 }
 
-/** Shape returned by the API (@bankr-wrapped/shared WrappedCacheRow). */
 type ApiWrappedCacheRow = {
   walletAddress: string;
   username: string;
@@ -65,10 +64,13 @@ type ApiWrappedCacheRow = {
       creatorEarnings: number;
       pleaseBroEarnings: number;
       total: number;
+      creatorEarningsEth: number;
+      pleaseBroEarningsEth: number;
+      totalEth: number;
     };
-    claimable: { unclaimed: number };
-    bestDay: { date: string; usd: number } | null;
-    dailyEarnings: { date: string; usd: number }[];
+    claimable: { unclaimed: number; unclaimedEth: number };
+    bestDay: { date: string; eth: number } | null;
+    dailyEarnings: { date: string; eth: number }[];
     claimCount: number;
     longestStreakDays: number;
     summary: { tokensLaunched: number; hasActivity: boolean };
@@ -89,11 +91,6 @@ function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
     return url.replace("_normal.", "_400x400.");
   }
-  // Farcaster/Warpcast avatars go through Cloudflare Images with a named
-  // variant as the final path segment (e.g. "/rectcrop3"). "original" is
-  // confirmed as the standard full-resolution variant for this exact CF
-  // Images account (imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/...) across
-  // Neynar's API docs, Farcaster's own Mini Apps docs, and Farcaster's blog.
   if (url.includes("imagedelivery.net/BXluQx4ige9GuW0Ia56BHw/")) {
     const lastSlash = url.lastIndexOf("/");
     return url.slice(0, lastSlash + 1) + "original";
@@ -116,6 +113,9 @@ function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     creatorEarnings: payload.earnings.creatorEarnings,
     pleaseBroEarnings: payload.earnings.pleaseBroEarnings,
     unclaimed: payload.claimable.unclaimed,
+    creatorEarningsEth: payload.earnings.creatorEarningsEth,
+    pleaseBroEarningsEth: payload.earnings.pleaseBroEarningsEth,
+    unclaimedEth: payload.claimable.unclaimedEth,
     bestDay: payload.bestDay,
     dailyEarnings: payload.dailyEarnings,
     claimCount: payload.claimCount,
@@ -128,7 +128,6 @@ function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
   };
 }
 
-/** Real lookup — calls the Bankr Wrapped API. Throws on failure; caller handles it. */
 export async function lookupWrapped(rawHandle: string): Promise<WrappedProfile> {
   const handle = rawHandle.trim().replace(/^@/, "").toLowerCase();
   if (!handle) throw new Error("Handle is required");
@@ -147,7 +146,6 @@ export async function lookupWrapped(rawHandle: string): Promise<WrappedProfile> 
   return mapToProfile(row);
 }
 
-/** Static suggestions shown on the search screen — no "trending" endpoint exists yet. */
 export const SUGGESTED = ["jessepollak", "degenMaxi0"];
 
 export type SearchSuggestion = {
@@ -156,7 +154,6 @@ export type SearchSuggestion = {
   profileImageUrl: string;
 };
 
-/** Live typeahead suggestions as the user types. Never throws - degrades to []. */
 export async function searchHandles(query: string): Promise<SearchSuggestion[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
@@ -170,16 +167,14 @@ export async function searchHandles(query: string): Promise<SearchSuggestion[]> 
   }
 }
 
-export const formatUsd = (n: number) =>
-  n >= 1_000_000
-    ? `$${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}M`
-    : n >= 1000
-      ? `$${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}K`
-      : `$${n.toFixed(0)}`;
-
-
-export const formatUsdFull = (n: number) =>
-  `$${Math.round(n).toLocaleString("en-US")}`;
+// Raw ETH formatting - adaptive precision since amounts are typically small
+// decimals. No USD conversion, no pricing methodology, just the real number.
+export const formatEth = (n: number) => {
+  if (n === 0) return "0 ETH";
+  if (n < 0.0001) return "<0.0001 ETH";
+  if (n < 1) return `${n.toFixed(4)} ETH`;
+  return `${n.toFixed(3)} ETH`;
+};
 
 export const CHAIN_LABEL: Record<Chain, string> = {
   base: "Base",
@@ -193,13 +188,11 @@ export type LeaderboardEntry = {
   avatarUrl: string;
   tokensLaunched: number;
   pleaseBroCount: number;
-  totalEarningsUsd: number;
-  unclaimedUsd: number;
+  totalEarningsEth: number;
+  unclaimedEth: number;
   updatedAt: string;
 };
 
-/** Top-20 earners. Degrades to [] on any failure - a leaderboard page
- * showing "no data" is better than a hard crash. */
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   try {
     const res = await fetch(`${API_URL}/api/leaderboard`);

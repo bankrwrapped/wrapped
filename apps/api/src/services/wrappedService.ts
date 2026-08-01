@@ -28,12 +28,9 @@ function pickBestMatch(
   if (exact.length === 1) return exact[0];
   // Multiple non-Twitter accounts share this exact handle (seen in practice -
   // two separate jessepollak0 Farcaster entries with different wallets) and
-  // Bankr's API gives us no field to tell which is "correct". Previously
-  // `exact[0]` trusted whatever order the API happened to return, which
-  // risks the SAME search resolving to a DIFFERENT wallet across requests
-  // if that ordering isn't stable. Sort deterministically ourselves so a
-  // repeat search always lands on the same wallet, even though we still
-  // can't know which duplicate is the "real" one from this data alone.
+  // Bankr's API gives us no field to tell which is "correct". Sort
+  // deterministically ourselves so a repeat search always lands on the same
+  // wallet, even though we still can't know which duplicate is "real".
   console.warn(
     "[wrappedService] pickBestMatch: " + exact.length +
     " duplicate exact-match accounts for '" + query +
@@ -53,9 +50,6 @@ async function resolveWallet(handle: string): Promise<BankrUserSearchResult | nu
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   console.log("[wrappedService] resolveWallet: outbound fetch took " + (Date.now() - fetchStart) + "ms");
   if (res.status === 400) {
-    // Bankr rejects malformed/oversized queries with 400 rather than an
-    // empty result set. Treat it the same as "no user found" -> 404,
-    // not a server error.
     console.log("[wrappedService] resolveWallet: Bankr returned 400, treating as not-found");
     return null;
   }
@@ -71,9 +65,6 @@ async function fetchCreatorFees(
   console.log("[wrappedService] fetchCreatorFees: start");
   try {
     await bankrRateLimiter.beforeFeesCall();
-    // Bankr's dailyEarnings window defaults to 30 days if omitted (per docs) -
-    // we never passed a days param at all, silently truncating the chart,
-    // streak, and bestDay to a third of the 90-day max Bankr actually allows.
     const res = await fetch(BANKR_API_BASE + "/public/doppler/creator-fees/" + address + "?days=90", {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
@@ -128,17 +119,8 @@ async function fetchBeneficiaryFees(
   }
 }
 
-// Free, unauthenticated ETH/USD price feed - Bankr's own price data requires
-// an API key + paid Club subscription, so this covers the public wrapped flow.
-//
-// Fragility fix: previously a single-source fetch that threw on any hiccup,
-// taking down the ENTIRE /api/wrapped/:handle request even when everything
-// else (fee data) succeeded. Now: try primary, fall back to a second
-// independent source, and as a last resort reuse the most recent
-// successfully-fetched price (in-memory, not persisted) rather than fail
-// outright. Only throws if primary AND secondary fail AND no prior price
-// has ever been cached in this process's lifetime (e.g. first request ever
-// happens during a simultaneous outage of both sources - rare).
+// ETH/USD price - only needed now for the INTERNAL usd figures (archetype
+// thresholds, leaderboard ranking). Display is pure ETH, no conversion.
 let lastKnownEthUsdPrice: number | null = null;
 
 async function fetchFromDefiLlama(): Promise<number> {
@@ -175,7 +157,6 @@ async function fetchEthUsdPrice(): Promise<number> {
   } catch (err) {
     console.log("[wrappedService] fetchEthUsdPrice: DefiLlama failed, trying Coinbase, err=" + String(err));
   }
-
   try {
     const price = await fetchFromCoinbase();
     lastKnownEthUsdPrice = price;
@@ -184,24 +165,15 @@ async function fetchEthUsdPrice(): Promise<number> {
   } catch (err) {
     console.log("[wrappedService] fetchEthUsdPrice: Coinbase also failed, err=" + String(err));
   }
-
   if (lastKnownEthUsdPrice !== null) {
     console.log("[wrappedService] fetchEthUsdPrice: both sources down, reusing last known price=" + lastKnownEthUsdPrice);
     return lastKnownEthUsdPrice;
   }
-
   throw new Error("ETH/USD price unavailable - both sources failed and no cached price exists");
 }
 
 function parseAmount(raw: string | undefined | null): number {
   if (!raw) return 0;
-  // Bankr represents dust-level amounts as "<0.000001" - an upper bound,
-  // not an exact value. The true amount could be anywhere from 0 up to
-  // just under that threshold. Treating it as literally 0.000001
-  // overstates near-zero balances - and since deriveVolumeWeth() divides
-  // by a small share fraction, that tiny error gets amplified into a
-  // real-looking dollar figure for what is actually ~$0 activity.
-  // Treat as 0 instead: the safe, non-overstating choice.
   if (raw.trim().startsWith("<")) return 0;
   const cleaned = raw.replace(/^[^0-9.\-]+/, "");
   const n = parseFloat(cleaned);
@@ -221,12 +193,6 @@ function wethAmount(
 ): number {
   if (entry.token0Label === "WETH") return parseAmount(entry[field].token0);
   if (entry.token1Label === "WETH") return parseAmount(entry[field].token1);
-  // Neither side is labeled WETH. Every Doppler pool observed this session
-  // (Base and Robinhood alike) quotes in WETH, but that isn't guaranteed by
-  // the API contract - silently returning 0 here would make real fees
-  // vanish with no trace, especially for pleaseBroEarnings, which has no
-  // Bankr-side aggregate to fall back on. Log loudly instead of assuming
-  // this can't happen.
   console.warn(
     "[wrappedService] wethAmount: neither token0Label nor token1Label is WETH - fee amount defaulting to 0. " +
     "tokenAddress=" + (entry.tokenAddress ?? "unknown") +
@@ -237,56 +203,10 @@ function wethAmount(
   return 0;
 }
 
-// Historical prices for the day-by-day earnings chart/bestDay/streak, so a
-// fee earned 60 days ago is priced at THAT day's ETH/USD rate rather than
-// today's. Falls back to the current price per-date on any miss/failure -
-// this is a display-accuracy improvement, never a hard requirement.
-async function fetchHistoricalEthPrices(dates: string[]): Promise<Record<string, number>> {
-  if (dates.length === 0) return {};
-  console.log("[wrappedService] fetchHistoricalEthPrices: start, dates=" + dates.length);
-  try {
-    const timestamps = dates.map((d) => Math.floor(new Date(d + "T12:00:00Z").getTime() / 1000));
-    const coinsParam = JSON.stringify({ "coingecko:ethereum": timestamps });
-    // searchWidth explicitly requested (24h) rather than trusting DefiLlama's
-    // unstated default - our own match filter below is widened to match,
-    // so we're not silently rejecting a good price because our cutoff was
-    // tighter than what we actually asked the API to search.
-    const res = await fetch(
-      "https://coins.llama.fi/batchHistorical?coins=" + encodeURIComponent(coinsParam) + "&searchWidth=24h",
-      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
-    );
-    if (!res.ok) throw new Error("batchHistorical failed: " + res.status);
-    const data = (await res.json()) as {
-      coins?: { "coingecko:ethereum"?: { prices?: { timestamp: number; price: number }[] } };
-    };
-    const prices = data.coins?.["coingecko:ethereum"]?.prices ?? [];
-    const result: Record<string, number> = {};
-    for (let i = 0; i < dates.length; i++) {
-      const match = prices.find((p) => Math.abs(p.timestamp - timestamps[i]) < 24 * 3600);
-      if (match) result[dates[i]] = match.price;
-    }
-    console.log("[wrappedService] fetchHistoricalEthPrices: done, resolved=" + Object.keys(result).length + "/" + dates.length);
-    return result;
-  } catch (err) {
-    console.log("[wrappedService] fetchHistoricalEthPrices: failed entirely, falling back to current price for all dates, err=" + String(err));
-    return {};
-  }
-}
-
 // Bankr's Clanker-sourced token entries have been observed reporting the
-// EXACT SAME claimable+claimed amounts (down to the raw string) across
-// multiple genuinely different tokens for the same wallet - e.g. three
-// unrelated tokens all showing "0.064711" WETH claimable, which then also
-// gets triple-counted into the wallet's aggregate totals (real example:
-// $576 "unclaimed" = 3 x $192, three token rows all showing an identical
-// "$192 earned"). Doppler tokens use a clean per-pool read and have never
-// shown this pattern - only Clanker tokens have, so this is scoped to
-// source === "clanker" only. When 2+ Clanker tokens for the same wallet
-// share an identical claimable+claimed fingerprint, keep the first
-// occurrence's real value and zero out the rest - both for per-token
-// display and for the wallet-level totals, which we now compute ourselves
-// from this deduped list rather than trusting creator.totals directly,
-// since that total appears to just sum the same duplicated per-token data.
+// EXACT SAME claimable+claimed amounts across multiple genuinely different
+// tokens for the same wallet. Doppler tokens use a clean per-pool read and
+// have never shown this pattern - scoped to source === "clanker" only.
 type ClankerDedupeEntry = {
   source: string;
   claimable: { token0: string; token1: string };
@@ -296,7 +216,7 @@ type ClankerDedupeEntry = {
 function dedupeClankerAmounts(tokens: ClankerDedupeEntry[]): boolean[] {
   const seen = new Set<string>();
   return tokens.map((t) => {
-    if (t.source !== "clanker") return true; // never dedupe Doppler tokens
+    if (t.source !== "clanker") return true;
     const key = t.claimable.token0 + "|" + t.claimable.token1 + "|" + t.claimed.token0 + "|" + t.claimed.token1;
     if (seen.has(key)) {
       console.warn("[wrappedService] dedupeClankerAmounts: dropping duplicate Clanker fee entry, key=" + key);
@@ -323,6 +243,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const creatorKeep = dedupeClankerAmounts(creator.tokens);
   const pleaseBroKeep = dedupeClankerAmounts(beneficiary.tokens);
 
+  // Tokens now carry raw ETH only - no per-token USD conversion needed.
   const launchedTokens: WrappedTokenEntry[] = creator.tokens.map((t, i) => {
     const feeWeth = creatorKeep[i] ? wethAmount(t, "claimable") + wethAmount(t, "claimed") : 0;
     return {
@@ -330,7 +251,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       name: t.name,
       symbol: t.symbol,
       chain: t.chain,
-      feesEarned: toUsd(feeWeth),
+      feesEarnedEth: feeWeth,
     };
   });
 
@@ -341,14 +262,10 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       name: t.name,
       symbol: t.symbol,
       chain: t.chain,
-      feesEarned: toUsd(feeWeth),
+      feesEarnedEth: feeWeth,
     };
   });
 
-  // "Earnings" now means everything this wallet has generated as a fee
-  // beneficiary - claimed AND still-claimable - not just what's been
-  // withdrawn. Computed from the deduped per-token list ourselves rather
-  // than trusting creator.totals - see dedupeClankerAmounts above.
   const creatorClaimedWeth = creator.tokens.reduce(
     (sum, t, i) => sum + (creatorKeep[i] ? wethAmount(t, "claimed") : 0),
     0
@@ -357,7 +274,6 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     (sum, t, i) => sum + (creatorKeep[i] ? wethAmount(t, "claimable") : 0),
     0
   );
-  const creatorEarnings = toUsd(creatorClaimedWeth + creatorClaimableWeth);
 
   const pleaseBroClaimedWeth = beneficiary.tokens.reduce(
     (sum, t, i) => sum + (pleaseBroKeep[i] ? wethAmount(t, "claimed") : 0),
@@ -367,45 +283,40 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     (sum, t, i) => sum + (pleaseBroKeep[i] ? wethAmount(t, "claimable") : 0),
     0
   );
-  const pleaseBroEarnings = toUsd(pleaseBroClaimedWeth + pleaseBroClaimableWeth);
 
-  const unclaimed = toUsd(creatorClaimableWeth + pleaseBroClaimableWeth);
+  // ETH totals - what's actually displayed.
+  const creatorEarningsEth = creatorClaimedWeth + creatorClaimableWeth;
+  const pleaseBroEarningsEth = pleaseBroClaimedWeth + pleaseBroClaimableWeth;
+  const totalEth = creatorEarningsEth + pleaseBroEarningsEth;
+  const unclaimedEth = creatorClaimableWeth + pleaseBroClaimableWeth;
 
-  // Full timeline first - bestDay is derived from this SAME array below,
-  // not from Bankr's own lifetimeBestDay field. Confirmed via raw API
-  // inspection that lifetimeBestDay can reference a date outside the
-  // dailyEarnings window we actually fetch (e.g. lifetimeDays: 1 while
-  // dailyEarnings spans ~90 days) - deriving our own keeps the "best day"
-  // callout consistent with the chart we render right next to it.
-  //
-  // Each day is priced at THAT day's ETH/USD rate, not today's - only
-  // fetched for dates with nonzero earnings (a $0 day is $0 regardless
-  // of price). Falls back to the current price for any date the batch
-  // historical call misses or fails on entirely.
-  const nonzeroDates = creator.dailyEarnings
-    .filter((d) => parseAmount(d.weth) > 0)
-    .map((d) => d.date);
-  const historicalPrices = await fetchHistoricalEthPrices(nonzeroDates);
+  // USD totals - internal only, priced at today's rate (locked-in decision
+  // after a session of confusing multi-day-pricing swings). Used solely for
+  // archetype thresholds and leaderboard ranking, never displayed directly.
+  const creatorEarnings = toUsd(creatorEarningsEth);
+  const pleaseBroEarnings = toUsd(pleaseBroEarningsEth);
+  const total = creatorEarnings + pleaseBroEarnings;
+  const unclaimed = toUsd(unclaimedEth);
 
-  const dailyEarnings = creator.dailyEarnings.map((d) => {
-    const weth = parseAmount(d.weth);
-    const priceForDay = historicalPrices[d.date] ?? ethUsd;
-    return { date: d.date, usd: weth * priceForDay };
-  });
+  // dailyEarnings/bestDay - now raw ETH, no price conversion at all. This
+  // removes the entire historical-pricing fetch that previously ran here -
+  // a genuine simplification, not just a display change.
+  const dailyEarnings = creator.dailyEarnings.map((d) => ({
+    date: d.date,
+    eth: parseAmount(d.weth),
+  }));
 
   const bestDay = dailyEarnings.reduce(
-    (best, d) => (d.usd > (best?.usd ?? 0) ? d : best),
-    null as { date: string; usd: number } | null
+    (best, d) => (d.eth > (best?.eth ?? 0) ? d : best),
+    null as { date: string; eth: number } | null
   );
 
-  // Longest run of consecutive calendar days with nonzero earnings. Assumes
-  // dailyEarnings is ascending by date (matches every observed Bankr response).
   const longestStreakDays = (() => {
     let longest = 0;
     let current = 0;
     let prevDate = null as Date | null;
     for (const d of dailyEarnings) {
-      if (d.usd <= 0) {
+      if (d.eth <= 0) {
         current = 0;
         prevDate = null;
         continue;
@@ -423,11 +334,6 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     return longest;
   })();
 
-  // Creator claims only previously - Please Bro claims (beneficiary.tokens[]
-  // each carry their own claimed.count) were silently excluded, undercounting
-  // total claim activity now that earnings itself includes both sources.
-  // Uses the same dedup as above - creator.totals.claimCount would also
-  // inherit the duplicate-Clanker-entry inflation otherwise.
   const creatorClaimCount = creator.tokens.reduce(
     (sum, t, i) => sum + (creatorKeep[i] ? (t.claimed?.count ?? 0) : 0),
     0
@@ -438,7 +344,6 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   );
   const claimCount = creatorClaimCount + pleaseBroClaimCount;
 
-  const total = creatorEarnings + pleaseBroEarnings;
   const bothFeesOk =
     creatorResult.status === "ok" && beneficiaryResult.status === "ok";
   const allZero =
@@ -446,11 +351,6 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     pleaseBroTokens.length === 0 &&
     total === 0 &&
     unclaimed === 0;
-  // Only claim "no activity" when we're confident it's actually zero - i.e.
-  // everything reads zero AND both endpoints genuinely succeeded. If any
-  // signal shows real activity (even with one endpoint down), or if both
-  // endpoints are down and we simply don't know, default to hasActivity:
-  // true rather than risk telling a real user "you have nothing".
   const hasActivity = !(allZero && bothFeesOk);
 
   return {
@@ -466,9 +366,12 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     earnings: {
       creatorEarnings,
       pleaseBroEarnings,
-      total: creatorEarnings + pleaseBroEarnings,
+      total,
+      creatorEarningsEth,
+      pleaseBroEarningsEth,
+      totalEth,
     },
-    claimable: { unclaimed },
+    claimable: { unclaimed, unclaimedEth },
     bestDay,
     dailyEarnings,
     claimCount,
@@ -515,11 +418,6 @@ async function getLeaderboard(limit = 20) {
   return wrappedCacheRepository.getTopTraders(limit);
 }
 
-// Cheap, unauthenticated typeahead lookup - deliberately does NOT do
-// wallet resolution or fee fetches, just the raw handle matches, so the
-// frontend can show a live dropdown as the user types. Degrades to an
-// empty array on any failure rather than throwing - it's a suggestions
-// list, never worth breaking the page over.
 async function searchHandles(query: string): Promise<BankrUserSearchResult[]> {
   console.log("[wrappedService] searchHandles: start, query=" + query);
   try {

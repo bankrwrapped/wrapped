@@ -1,9 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
-
-import { fetchLeaderboard, formatUsd, type LeaderboardEntry } from "@/lib/wrapped-data";
-
+import { fetchLeaderboard, formatEth, type LeaderboardEntry } from "@/lib/wrapped-data";
 export const Route = createFileRoute("/leaderboard")({
   head: () => ({
     meta: [
@@ -16,10 +14,8 @@ export const Route = createFileRoute("/leaderboard")({
   }),
   component: LeaderboardPage,
 });
-
 function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
-
   useEffect(() => {
     let cancelled = false;
     fetchLeaderboard().then((data) => {
@@ -29,7 +25,6 @@ function LeaderboardPage() {
       cancelled = true;
     };
   }, []);
-
   return (
     <div className="mx-auto min-h-screen w-full max-w-xl px-5 py-8">
       <Link to="/" className="mb-6 flex w-fit items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
@@ -66,7 +61,7 @@ function LeaderboardPage() {
                 </p>
               </div>
               <span className="font-display text-lg font-extrabold text-accent">
-                {formatUsd(e.totalEarningsUsd)}
+                {formatEth(e.totalEarningsEth)}
               </span>
             </li>
           ))}

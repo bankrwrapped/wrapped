@@ -1,4 +1,4 @@
-import { CHAIN_LABEL, formatUsd, type TokenEntry } from "@/lib/wrapped-data";
+import { CHAIN_LABEL, formatEth, type TokenEntry } from "@/lib/wrapped-data";
 import { tokenHue, tokenInitials } from "@/lib/token-badge";
 export function TokenRow({ token, index }: { token: TokenEntry; index: number }) {
   const hue = tokenHue(token.tokenAddress);
@@ -22,7 +22,7 @@ export function TokenRow({ token, index }: { token: TokenEntry; index: number })
       </div>
       <div className="text-right">
         <p className="font-display text-base font-bold text-accent">
-          {formatUsd(token.feesEarned)}
+          {formatEth(token.feesEarnedEth)}
         </p>
         <p className="text-[11px] uppercase tracking-widest text-muted-foreground">
           earned

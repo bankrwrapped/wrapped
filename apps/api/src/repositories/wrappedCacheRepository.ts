@@ -43,12 +43,15 @@ export const wrappedCacheRepository = {
           wallet_address, username, platform, display_name, avatar_url,
           tokens_launched, please_bro_count,
           creator_earnings_usd, please_bro_earnings_usd, total_earnings_usd, unclaimed_usd,
+          creator_earnings_eth, please_bro_earnings_eth, total_earnings_eth, unclaimed_eth,
           payload, updated_at
         ) values (
           ${wallet}, ${username}, ${payload.user.platform}, ${payload.user.displayName}, ${payload.user.avatar},
           ${payload.summary.tokensLaunched}, ${payload.pleaseBroTokens.length},
           ${payload.earnings.creatorEarnings}, ${payload.earnings.pleaseBroEarnings},
           ${payload.earnings.total}, ${payload.claimable.unclaimed},
+          ${payload.earnings.creatorEarningsEth}, ${payload.earnings.pleaseBroEarningsEth},
+          ${payload.earnings.totalEth}, ${payload.claimable.unclaimedEth},
           ${payload}, ${now}
         )
         on conflict (wallet_address) do update set
@@ -62,6 +65,10 @@ export const wrappedCacheRepository = {
           please_bro_earnings_usd = excluded.please_bro_earnings_usd,
           total_earnings_usd = excluded.total_earnings_usd,
           unclaimed_usd = excluded.unclaimed_usd,
+          creator_earnings_eth = excluded.creator_earnings_eth,
+          please_bro_earnings_eth = excluded.please_bro_earnings_eth,
+          total_earnings_eth = excluded.total_earnings_eth,
+          unclaimed_eth = excluded.unclaimed_eth,
           payload = excluded.payload,
           updated_at = excluded.updated_at
         returning wallet_address, username, payload, updated_at
@@ -79,9 +86,9 @@ export const wrappedCacheRepository = {
       for (const t of tokenRows) {
         await tx`
           insert into wrapped_tokens (
-            wallet_address, token_address, name, symbol, chain, category, volume_usd, updated_at
+            wallet_address, token_address, name, symbol, chain, category, fees_earned_eth, updated_at
           ) values (
-            ${wallet}, ${t.tokenAddress}, ${t.name}, ${t.symbol}, ${t.chain}, ${t.category}, ${t.feesEarned}, ${now}
+            ${wallet}, ${t.tokenAddress}, ${t.name}, ${t.symbol}, ${t.chain}, ${t.category}, ${t.feesEarnedEth}, ${now}
           )
         `;
       }
@@ -95,16 +102,14 @@ export const wrappedCacheRepository = {
   // Live rank + total user count for a single wallet. Recomputed on every
   // request - never cached alongside payload, since other users being
   // wrapped constantly shifts this. Returns rank 1 = highest earner.
+  // Ranking stays USD-based per explicit decision - a simple, stable metric
+  // for ordering even though displayed figures are ETH.
   async getRank(wallet: string): Promise<{ rank: number; totalUsers: number }> {
     const [totalRow] = (await db`
       select count(*)::int as total from wrapped_profiles
     `) as Array<{ total: number }>;
     const totalUsers = totalRow?.total ?? 0;
 
-    // Tie-break on updated_at: users with equal total_earnings_usd (very
-    // common at $0) previously all got the same rank number. Whoever
-    // checked their Wrapped first now wins the tie, giving every user a
-    // distinct rank rather than large blocks sharing one number.
     const [rankRow] = (await db`
       select count(*)::int as higher
       from wrapped_profiles
@@ -126,11 +131,13 @@ export const wrappedCacheRepository = {
   },
 
   // Powers the marketing / partnership leaderboard. Wired to GET /api/leaderboard.
+  // Ordering stays USD-based; the ETH columns are what's actually rendered.
   async getTopTraders(limit = 20): Promise<TopTraderEntry[]> {
     const rows = (await db`
       select wallet_address, username, display_name, avatar_url,
              tokens_launched, please_bro_count,
-             total_earnings_usd, unclaimed_usd, updated_at
+             total_earnings_usd, unclaimed_usd,
+             total_earnings_eth, unclaimed_eth, updated_at
       from wrapped_profiles
       order by total_earnings_usd desc
       limit ${limit}
@@ -143,6 +150,8 @@ export const wrappedCacheRepository = {
       please_bro_count: number;
       total_earnings_usd: string;
       unclaimed_usd: string;
+      total_earnings_eth: string;
+      unclaimed_eth: string;
       updated_at: string;
     }>;
 
@@ -155,6 +164,8 @@ export const wrappedCacheRepository = {
       pleaseBroCount: r.please_bro_count,
       totalEarningsUsd: Number(r.total_earnings_usd),
       unclaimedUsd: Number(r.unclaimed_usd),
+      totalEarningsEth: Number(r.total_earnings_eth),
+      unclaimedEth: Number(r.unclaimed_eth),
       updatedAt: new Date(r.updated_at).toISOString(),
     }));
   },

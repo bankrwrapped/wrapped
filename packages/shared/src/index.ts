@@ -104,14 +104,11 @@ export interface WrappedTokenEntry {
   name: string;
   symbol: string;
   chain: Chain;
-  // Actual USD fees (claimable + claimed) attributable to this specific
-  // token, for both Doppler and Clanker sources - unlike the old derived
-  // "volume" estimate, this is real and never null, since fee amounts
-  // come straight from Bankr's own claimable/claimed data regardless of
-  // source. Trading volume itself still isn't derivable for Clanker
-  // tokens (their swap fee rate isn't exposed), so this represents
-  // earnings, not volume.
-  feesEarned: number;
+  // Raw WETH (claimable + claimed) attributable to this specific token, for
+  // both Doppler and Clanker sources. Displayed as-is, no USD conversion -
+  // decision made after a session of confusing price-conversion swings:
+  // ETH is an objective fact with no pricing-methodology debate attached.
+  feesEarnedEth: number;
 }
 
 export interface WrappedUser {
@@ -129,18 +126,28 @@ export interface WrappedPayload {
   tokens: WrappedTokenEntry[]; // "launched" tokens - from creator-fees
   pleaseBroTokens: WrappedTokenEntry[]; // from beneficiary-fees
   earnings: {
+    // USD fields kept INTERNAL ONLY - never displayed, used solely for
+    // archetype thresholds and leaderboard ranking (explicit decision:
+    // display switches fully to ETH, but ranking/archetype stay USD-based).
     creatorEarnings: number;
     pleaseBroEarnings: number;
     total: number;
+    // ETH fields - what's actually shown to users.
+    creatorEarningsEth: number;
+    pleaseBroEarningsEth: number;
+    totalEth: number;
   };
-  claimable: { unclaimed: number };
-  // Best single day of creator earnings, converted to USD. null if Bankr
-  // never reported one (e.g. no earnings history at all).
-  bestDay: { date: string; usd: number } | null;
-  // Full day-by-day creator earnings timeline (USD), ascending by date, as
-  // returned by Bankr's dailyEarnings window - already fetched for bestDay,
-  // previously discarded.
-  dailyEarnings: { date: string; usd: number }[];
+  claimable: {
+    unclaimed: number; // USD, internal only (archetype thresholds)
+    unclaimedEth: number; // ETH, displayed
+  };
+  // Best single day of creator earnings, in raw ETH. No longer priced at
+  // all (previously historically-priced in USD) - since we display raw
+  // ETH now, there's no conversion step, and no historical-price fetching
+  // needed for this feature anymore.
+  bestDay: { date: string; eth: number } | null;
+  // Full day-by-day creator earnings timeline, raw ETH, ascending by date.
+  dailyEarnings: { date: string; eth: number }[];
   // Total number of times this wallet has claimed creator fees (lifetime).
   claimCount: number;
   // Longest run of consecutive calendar days with nonzero creator earnings.
@@ -181,7 +188,12 @@ export interface TopTraderEntry {
   avatarUrl: string;
   tokensLaunched: number;
   pleaseBroCount: number;
+  // USD kept for internal ranking use only (getTopTraders orders by this
+  // column server-side) - not necessarily displayed by the frontend.
   totalEarningsUsd: number;
   unclaimedUsd: number;
+  // ETH - what's actually shown on the leaderboard page.
+  totalEarningsEth: number;
+  unclaimedEth: number;
   updatedAt: string;
 }
