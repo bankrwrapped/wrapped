@@ -402,6 +402,15 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// Windows/desktop Chrome DOES implement navigator.share, but it opens the
+// generic OS share panel (Mail, Nearby Sharing, etc.) - not a path to X
+// specifically. Native share is only genuinely useful on mobile, where it
+// offers real installed social apps. Gate it to mobile so desktop always
+// goes straight to download + open the real X/Farcaster compose window.
+function isMobileDevice(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: () => void }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [capturing, setCapturing] = useState<"x" | "farcaster" | "download" | null>(null);
@@ -604,7 +613,9 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
               if (blob) {
                 const file = new File([blob], "bankr-wrapped.png", { type: "image/png" });
                 const canNativeShare =
-                  typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+                  isMobileDevice() &&
+                  typeof navigator.canShare === "function" &&
+                  navigator.canShare({ files: [file] });
                 if (canNativeShare) {
                   try {
                     await navigator.share({ files: [file], text: shareText });
@@ -639,7 +650,9 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
               if (blob) {
                 const file = new File([blob], "bankr-wrapped.png", { type: "image/png" });
                 const canNativeShare =
-                  typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+                  isMobileDevice() &&
+                  typeof navigator.canShare === "function" &&
+                  navigator.canShare({ files: [file] });
                 if (canNativeShare) {
                   try {
                     await navigator.share({ files: [file], text: farcasterShareText });
