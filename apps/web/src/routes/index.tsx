@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { ArrowRight, Search, Trophy, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { BuildingWrappedState } from "@/components/wrapped/BuildingWrappedState";
+import { HeaderActions } from "@/components/wrapped/HeaderActions";
 import { NoAccountState } from "@/components/wrapped/NoAccountState";
 import { NoActivityState } from "@/components/wrapped/NoActivityState";
 import { SceneMilestones } from "@/components/wrapped/SceneMilestones";
@@ -60,6 +62,7 @@ function Index() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [apiDone, setApiDone] = useState(false);
+  const [selectedAvatar, setSelectedAvatar] = useState<string | null>(null);
 
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -92,6 +95,7 @@ function Index() {
 
   const onHandleInputChange = (value: string) => {
     setHandle(value);
+    setSelectedAvatar(null);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = value.trim();
     if (trimmed.length < 2) {
@@ -109,6 +113,7 @@ function Index() {
 
   const selectSuggestion = (s: SearchSuggestion) => {
     setHandle(s.username);
+    setSelectedAvatar(s.profileImageUrl);
     setSuggestions([]);
     setShowSuggestions(false);
   };
@@ -135,23 +140,29 @@ function Index() {
     }
   };
 
-  const onBuildingDone = () => {
+  const onBuildingDone = useCallback(() => {
     if (notFound) {
       setPhase("no-account");
     } else if (profile) {
       setPhase(profile.hasActivity ? "story" : "revealing");
     } else {
-      // real fetch failed with a non-404 error - back to search with the message shown
       setPhase("search");
     }
-  };
+  }, [notFound, profile]);
 
   let content;
 
   if (phase === "intro") {
     content = <SceneMilestones onDone={() => setPhase("search")} />;
   } else if (phase === "building") {
-    content = <BuildingWrappedState apiDone={apiDone} onDone={onBuildingDone} />;
+    content = (
+      <BuildingWrappedState
+        apiDone={apiDone}
+        onDone={onBuildingDone}
+        handle={handle}
+        avatarUrl={selectedAvatar}
+      />
+    );
   } else if (phase === "revealing" && profile) {
     content = (
       <SceneNoActivityReveal
@@ -168,38 +179,60 @@ function Index() {
   } else {
     content = (
       <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-5">
-        <div className="pointer-events-none absolute -left-32 top-0 size-[30rem] animate-drift rounded-full bg-primary/30 blur-[130px]" />
-        <div className="pointer-events-none absolute -right-24 bottom-0 size-[26rem] animate-glow-pulse rounded-full bg-accent/20 blur-[130px]" />
+        <img
+          src="/liquid-glass-bg.jpg"
+          alt=""
+          aria-hidden
+          className="pointer-events-none absolute inset-0 size-full object-cover"
+        />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/80 via-background/55 to-background/85" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/25 via-transparent to-accent/20" />
 
-        <div className="relative z-10 w-full max-w-lg space-y-8 text-center">
-          <div className="animate-rise flex items-center justify-center gap-3">
-            <span className="font-display text-sm font-bold uppercase tracking-[0.3em]">
-              Bankr <span className="text-gradient">Wrapped</span> 2026
+        <motion.div
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 140, damping: 16 }}
+          className="absolute left-5 right-5 top-5 z-20 flex items-center justify-between gap-2.5"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
+              <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+            </div>
+            <span className="font-display text-sm font-bold tracking-tight">
+              Bankr <span className="text-gradient">Wrapped</span>
             </span>
           </div>
+          <HeaderActions />
+        </motion.div>
 
-          <div className="space-y-3">
-            <h1 className="animate-rise font-display text-5xl font-extrabold sm:text-6xl">
+        <div className="relative z-10 w-full max-w-lg space-y-7 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            transition={{ type: "spring", stiffness: 120, damping: 16 }}
+            className="space-y-3"
+          >
+            <h1 className="font-display text-5xl font-extrabold sm:text-6xl">
               Discover your year on Bankr
             </h1>
-            <p
-              className="animate-rise text-base text-muted-foreground"
-              style={{ animationDelay: "120ms" }}
-            >
+            <p className="text-base text-muted-foreground">
               Search your X or Farcaster username
             </p>
-          </div>
+          </motion.div>
 
-          <form
+          <motion.form
             onSubmit={(e) => {
               e.preventDefault();
               void run(handle);
             }}
-            className="animate-rise space-y-3"
-            style={{ animationDelay: "220ms" }}
+            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ type: "spring", stiffness: 120, damping: 16, delay: 0.12 }}
+            className="glass relative space-y-3 rounded-3xl p-4 backdrop-blur-xl"
           >
+            <div className="animate-sweep pointer-events-none absolute inset-0 overflow-hidden rounded-3xl" />
             <div ref={searchBoxRef} className="relative">
-              <div className="glass flex items-center gap-3 rounded-2xl px-4 py-3">
+              <div className="flex items-center gap-3 rounded-2xl border border-glass-border bg-background/30 px-4 py-3">
                 <Search className="size-4 shrink-0 text-muted-foreground" />
                 <input
                   value={handle}
@@ -224,48 +257,68 @@ function Index() {
                 )}
               </div>
 
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="glass absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl text-left">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s.platform + ":" + s.username}
-                      type="button"
-                      onClick={() => selectSuggestion(s)}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/10"
-                    >
-                      <img
-                        src={s.profileImageUrl}
-                        alt={s.username}
-                        className="size-8 shrink-0 rounded-full object-cover"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          @{s.username}
+              <AnimatePresence>
+                {showSuggestions && suggestions.length > 0 && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    className="relative z-20 mt-2 overflow-hidden rounded-2xl border border-glass-border bg-background text-left shadow-2xl"
+                  >
+                    {suggestions.map((s) => (
+                      <button
+                        key={s.platform + ":" + s.username}
+                        type="button"
+                        onClick={() => selectSuggestion(s)}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/10"
+                      >
+                        <img
+                          src={s.profileImageUrl}
+                          alt={s.username}
+                          className="size-8 shrink-0 rounded-full object-cover"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">
+                            @{s.username}
+                          </span>
                         </span>
-                      </span>
-                      <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-xs text-muted-foreground">
-                        {PLATFORM_LABEL[s.platform]}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+                        <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-xs text-muted-foreground">
+                          {PLATFORM_LABEL[s.platform]}
+                        </span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <Button type="submit" variant="hero" size="xl" className="w-full">
               View My Wrapped <ArrowRight className="size-4" />
             </Button>
-          </form>
+          </motion.form>
 
-          <p className="animate-rise text-xs text-muted-foreground" style={{ animationDelay: "260ms" }}>
-            "Please Bro" tokens are ones where someone redirected their creator fees to you.
-          </p>
-          <p className="animate-rise text-xs text-muted-foreground" style={{ animationDelay: "270ms" }}>
-            Shows your activity on Bankr specifically &mdash; not other launchpads.
-          </p>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+            className="space-y-1.5"
+          >
+            <p className="text-xs text-muted-foreground">
+              "Please Bro" tokens are ones where someone redirected their creator fees to you.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Shows your activity on Bankr specifically &mdash; not other launchpads.
+            </p>
+          </motion.div>
 
           {error && (
-            <div className="animate-rise glass space-y-2 rounded-2xl px-4 py-3" role="alert">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass space-y-2 rounded-2xl px-4 py-3"
+              role="alert"
+            >
               <p className="text-sm text-destructive">{error}</p>
               <button
                 type="button"
@@ -274,20 +327,37 @@ function Index() {
               >
                 Try again
               </button>
-            </div>
+            </motion.div>
           )}
 
-          <Link
-            to="/leaderboard"
-            className="glass animate-rise mx-auto flex w-fit items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors hover:border-accent/40"
-            style={{ animationDelay: "280ms" }}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
           >
-            <Trophy className="size-4 text-accent" /> View leaderboard
-          </Link>
+            <Link
+              to="/leaderboard"
+              className="glass mx-auto flex w-fit items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors hover:border-accent/40"
+            >
+              <Trophy className="size-4 text-accent" /> View leaderboard
+            </Link>
+          </motion.div>
         </div>
       </main>
     );
   }
 
-  return content;
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={phase}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {content}
+      </motion.div>
+    </AnimatePresence>
+  );
 }

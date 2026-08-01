@@ -61,25 +61,25 @@ Bun.serve({
       const clientIp = getClientIp(req, server);
       const limit = checkSearchSuggestRouteLimit(clientIp);
       if (!limit.allowed) {
-        return withCors(tooManyRequests(limit.retryAfterSeconds));
+        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
       const query = url.searchParams.get("query")?.trim() ?? "";
       if (query.length < 2) {
-        return withCors(Response.json({ results: [] }));
+        return withCors(Response.json({ results: [] }), req);
       }
       try {
         const results = await wrappedService.searchHandles(query);
-        return withCors(Response.json({ results: results.slice(0, 8) }));
+        return withCors(Response.json({ results: results.slice(0, 8) }), req);
       } catch (err) {
         console.error("[api] search request failed:", err);
-        return withCors(Response.json({ results: [] }));
+        return withCors(Response.json({ results: [] }), req);
       }
     }
 
     if (url.pathname === "/api/leaderboard" && req.method === "GET") {
       try {
         const res = await getLeaderboardController();
-        return withCors(res);
+        return withCors(res, req);
       } catch (err) {
         // Never leak the raw technical error to users - log it server-side
         // for us, show something calm and actionable to them.
@@ -87,7 +87,7 @@ Bun.serve({
         return withCors(Response.json(
           { error: "Couldn't load the leaderboard right now. Try again in a moment." },
           { status: 500 }
-        ));
+        ), req);
       }
     }
 
@@ -96,12 +96,12 @@ Bun.serve({
       const clientIp = getClientIp(req, server);
       const limit = checkWrappedRouteLimit(clientIp);
       if (!limit.allowed) {
-        return withCors(tooManyRequests(limit.retryAfterSeconds));
+        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
 
       try {
         const res = await getWrappedController(req, decodeURIComponent(wrappedMatch[1]));
-        return withCors(res);
+        return withCors(res, req);
       } catch (err) {
         // Previously leaked the raw "internal error" string straight to the
         // UI with no context - most likely cause is resolveWallet() still
@@ -112,11 +112,11 @@ Bun.serve({
         return withCors(Response.json(
           { error: "Couldn't load that Wrapped right now — Bankr's service might be slow or briefly unavailable. Try again in a moment." },
           { status: 500 }
-        ));
+        ), req);
       }
     }
 
-    return withCors(new Response("Not found", { status: 404 }));
+    return withCors(new Response("Not found", { status: 404 }), req);
   },
 });
 

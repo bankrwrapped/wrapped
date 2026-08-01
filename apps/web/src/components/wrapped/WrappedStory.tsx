@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 
 import {
@@ -11,25 +12,27 @@ import {
   SceneTimeline,
   SceneUnclaimed,
 } from "@/components/wrapped/scenes";
-import { cn } from "@/lib/utils";
+import { SceneAboutOutro } from "@/components/wrapped/SceneAboutOutro";
+import { HeaderActions } from "@/components/wrapped/HeaderActions";
 import type { WrappedProfile } from "@/lib/wrapped-data";
 
-// ScenePleaseBro (index 3) bumped 6800ms -> 7300ms: it gained a counter
-// beat (matching SceneLaunched's rhythm) without its duration being
-// adjusted at the time - the extra 500ms accounts for the new beat.
-const DURATIONS = [5200, 4600, 8200, 7300, 8500, 7000, 7500, 20000];
+// ScenePleaseBro (index 3) bumped 6800ms -> 7300ms for its added counter
+// beat. Scene 8 (Summary) now genuinely auto-advances after 20s into the
+// new About-outro scene (index 8, the true final scene) rather than that
+// duration being unused dead weight.
+const DURATIONS = [5200, 4600, 8200, 7300, 8500, 7000, 7500, 20000, 20000];
+const TOTAL_DURATION = DURATIONS.reduce((a, b) => a + b, 0);
+const CUMULATIVE = DURATIONS.reduce<number[]>((acc, d, i) => {
+  acc.push((acc[i - 1] ?? 0) + (i === 0 ? 0 : DURATIONS[i - 1]));
+  return acc;
+}, []);
 
-/** Ambient light tone per scene: purple -> orange -> balanced. */
-const TONES = [
-  "from-primary/35 via-background to-background",
-  "from-primary/45 via-background to-background",
-  "from-primary/35 via-background to-accent/10",
-  "from-primary/25 via-background to-accent/20",
-  "from-accent/35 via-background to-primary/15",
-  "from-accent/32 via-background to-primary/18",
-  "from-accent/30 via-background to-primary/20",
-  "from-primary/30 via-background to-accent/30",
-];
+const chapterMotion = {
+  initial: { opacity: 0, scale: 0.96, filter: "blur(10px)" },
+  animate: { opacity: 1, scale: 1, filter: "blur(0px)" },
+  exit: { opacity: 0, scale: 1.03, filter: "blur(8px)" },
+  transition: { type: "spring" as const, stiffness: 130, damping: 18 },
+};
 
 export function WrappedStory({
   profile,
@@ -69,6 +72,13 @@ export function WrappedStory({
     return () => cancelAnimationFrame(raf);
   }, [index, paused, last]);
 
+  // Snap progress to full on the final scene - the timer effect above
+  // bails out early for index === last with no scene to advance INTO,
+  // which previously left the rail visually frozen at the prior boundary.
+  useEffect(() => {
+    if (index === last) setProgress(1);
+  }, [index, last]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") go(1);
@@ -91,48 +101,92 @@ export function WrappedStory({
     <SceneTimeline key="6" p={profile} />,
     <SceneUnclaimed key="7" p={profile} />,
     <SceneSummary key="8" p={profile} onRestart={onRestart} />,
+    <SceneAboutOutro
+      key="9"
+      onShareCard={() => {
+        setIndex(7);
+        setProgress(0);
+        setPaused(true);
+      }}
+    />,
   ];
+
+  const overallPct =
+    ((CUMULATIVE[index] + progress * DURATIONS[index]) / TOTAL_DURATION) * 100;
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden">
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-0 bg-gradient-to-b transition-all duration-1000",
-          TONES[index],
-        )}
+      <img
+        src="/liquid-glass-bg.jpg"
+        alt=""
+        aria-hidden
+        className="pointer-events-none fixed inset-0 size-full object-cover"
       />
-      <div className="pointer-events-none absolute -left-24 top-1/4 size-[28rem] animate-drift rounded-full bg-primary/25 blur-[120px]" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 size-[26rem] animate-glow-pulse rounded-full bg-accent/20 blur-[130px]" />
+      <div className="pointer-events-none fixed inset-0 bg-gradient-to-b from-background/85 via-background/65 to-background/90" />
+      <div className="pointer-events-none fixed inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
+      <div className="pointer-events-none absolute -left-24 top-1/4 size-[26rem] animate-drift rounded-full bg-primary/20 blur-[130px]" />
+      <div className="pointer-events-none absolute -right-24 bottom-0 size-[24rem] animate-glow-pulse rounded-full bg-accent/15 blur-[130px]" />
 
       <div className="relative z-10 mx-auto flex w-full max-w-xl flex-1 flex-col px-5 pb-8 pt-5">
-        <div className="flex gap-1.5">
-          {DURATIONS.map((_, i) => (
-            <div key={i} className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/15">
-              <div
-                className="h-full rounded-full bg-foreground transition-[width] duration-100"
-                style={{ width: (i < index ? 100 : i === index ? progress * 100 : 0) + "%" }}
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-          <span className="font-display font-semibold uppercase tracking-[0.3em]">
-            Bankr Wrapped
+        <div className="flex items-center gap-2.5">
+          <div className="glass flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full">
+            <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+          </div>
+          <span className="font-display text-sm font-bold tracking-tight">
+            Bankr <span className="text-gradient">Wrapped</span>
           </span>
-          <button
-            type="button"
-            onClick={() => setPaused((v) => !v)}
-            className="flex items-center gap-1.5 rounded-full px-2 py-1 hover:text-foreground"
-          >
-            {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
-            {paused ? "Play" : "Pause"}
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <HeaderActions />
+            <button
+              type="button"
+              onClick={() => setPaused((v) => !v)}
+              className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
+              {paused ? "Play" : "Pause"}
+            </button>
+          </div>
         </div>
 
-        <div key={index} className="flex flex-1 animate-scene-in items-center justify-center py-8">
-          {scenes[index]}
+        <div className="relative mt-4 h-2.5">
+          <div className="glass absolute inset-0 overflow-hidden rounded-full">
+            <div
+              className="relative h-full rounded-full bg-gradient-to-r from-primary to-accent"
+              style={{ width: `${overallPct}%` }}
+            >
+              <div className="animate-sweep pointer-events-none absolute inset-0" />
+            </div>
+          </div>
+
+          {CUMULATIVE.slice(1).map((c, i) => (
+            <div
+              key={i}
+              className="pointer-events-none absolute top-0 h-full w-px bg-background/40"
+              style={{ left: `${(c / TOTAL_DURATION) * 100}%` }}
+            />
+          ))}
+
+          <div
+            className="pointer-events-none absolute top-1/2 h-4 w-16 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent to-accent-glow/60 blur-md"
+            style={{ left: `calc(${overallPct}% - 4rem)` }}
+          />
+          <motion.div
+            animate={{ scale: [1, 1.25, 1] }}
+            transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+            className="pointer-events-none absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_14px_3px_rgba(255,255,255,0.7)]"
+            style={{ left: `${overallPct}%` }}
+          />
         </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={index}
+            {...chapterMotion}
+            className="flex flex-1 items-center justify-center py-8"
+          >
+            {scenes[index]}
+          </motion.div>
+        </AnimatePresence>
 
         <div className="flex items-center justify-between">
           <button
@@ -159,7 +213,6 @@ export function WrappedStory({
         </div>
       </div>
 
-      {/* Tap zones (Stories style) */}
       <button
         type="button"
         aria-label="Previous scene"
