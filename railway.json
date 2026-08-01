@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "bun install && bunx turbo run build --filter=@bankr-wrapped/api"
+  },
+  "deploy": {
+    "startCommand": "bun run apps/api/dist/index.js",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
