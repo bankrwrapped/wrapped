@@ -47,27 +47,27 @@ export function HeaderActions() {
   const toggle = (key: "about" | "socials" | "team") => setOpen((o) => (o === key ? null : key));
 
   return (
-    <div ref={ref} className="relative flex items-center gap-2">
+    <div ref={ref} className="relative flex shrink-0 items-center gap-1 sm:gap-2">
       <button
         type="button"
         onClick={() => toggle("about")}
-        className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground sm:px-3"
       >
-        <Info className="size-3.5" /> About
+        <Info className="size-3.5" /> <span className="hidden sm:inline">About</span>
       </button>
       <button
         type="button"
         onClick={() => toggle("socials")}
-        className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground sm:px-3"
       >
-        <Share2 className="size-3.5" /> Socials
+        <Share2 className="size-3.5" /> <span className="hidden sm:inline">Socials</span>
       </button>
       <button
         type="button"
         onClick={() => toggle("team")}
-        className="glass flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground sm:px-3"
       >
-        <Users className="size-3.5" /> Team
+        <Users className="size-3.5" /> <span className="hidden sm:inline">Team</span>
       </button>
 
       <AnimatePresence>
@@ -77,7 +77,7 @@ export function HeaderActions() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}
             transition={{ type: "spring", stiffness: 260, damping: 22 }}
-            className="absolute left-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-2xl border border-glass-border bg-background p-4 text-left shadow-2xl"
+            className="absolute right-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2.5rem)] overflow-hidden rounded-2xl border border-glass-border bg-background p-4 text-left shadow-2xl"
           >
             {open === "about" && (
               <div className="space-y-3">

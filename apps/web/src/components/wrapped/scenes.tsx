@@ -91,7 +91,7 @@ export function SceneContribution({ p }: { p: WrappedProfile }) {
 function DataUnavailable() {
   return (
     <p className="animate-rise glass rounded-2xl px-4 py-6 text-center text-sm text-muted-foreground">
-      Couldn't load this right now — Bankr's data was unavailable. Try searching again in a
+      Couldn't load this right now. Bankr's data was unavailable, try searching again in a
       moment.
     </p>
   );
@@ -105,7 +105,7 @@ export function SceneLaunched({ p }: { p: WrappedProfile }) {
       <div className="text-center">
         <Kicker>Tokens launched</Kicker>
         {unavailable ? (
-          <p className="font-display text-2xl font-semibold text-muted-foreground">—</p>
+          <p className="font-display text-2xl font-semibold text-muted-foreground">N/A</p>
         ) : (
           <motion.p
             initial={{ opacity: 0, scale: 0.7 }}
@@ -142,7 +142,7 @@ export function ScenePleaseBro({ p }: { p: WrappedProfile }) {
       <div className="text-center">
         <Kicker>Redirected fees</Kicker>
         {unavailable ? (
-          <p className="font-display text-2xl font-semibold text-muted-foreground">—</p>
+          <p className="font-display text-2xl font-semibold text-muted-foreground">N/A</p>
         ) : (
           <motion.p
             initial={{ opacity: 0, scale: 0.7 }}

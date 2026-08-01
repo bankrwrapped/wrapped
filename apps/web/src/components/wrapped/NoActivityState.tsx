@@ -8,12 +8,12 @@ const STEPS: Step[] = [
   {
     emoji: "\u{1F680}",
     title: "Launch a token",
-    body: "The fastest way to a real Wrapped — deploy through Bankr and start earning creator fees immediately.",
+    body: "The fastest way to a real Wrapped. Deploy through Bankr and start earning creator fees immediately.",
   },
   {
     emoji: "\u{1F91D}",
     title: "Get a Please Bro token",
-    body: "Have someone redirect their creator fees to you — it counts just as much as launching your own.",
+    body: "Have someone redirect their creator fees to you. It counts just as much as launching your own.",
   },
   {
     emoji: "\u{1F4C8}",

@@ -21,7 +21,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (totalEarned >= 5000) {
     return {
       title: "The Whale",
-      description: "Serious earnings on Bankr — you're not playing small.",
+      description: "Serious earnings on Bankr, you're not playing small.",
     };
   }
 
