@@ -227,3 +227,13 @@
 @utility animate-slide-out {
   animation: slide-out 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* Text-shadow safety net for legibility against the liquid-glass photo
+   background - gradient scrims alone can't guarantee coverage everywhere,
+   since the photo has bright streaks that shift position across the
+   viewport. A subtle dark shadow directly on text guarantees contrast
+   regardless of what's behind it at any given point, rather than us
+   continuing to chase gradient-opacity tuning per page. */
+body {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 8px rgba(0, 0, 0, 0.25);
+}
