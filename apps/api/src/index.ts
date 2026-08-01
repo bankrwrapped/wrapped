@@ -76,6 +76,42 @@ Bun.serve({
       }
     }
 
+    // Proxies external avatar images (Twitter/Farcaster CDNs) so the
+    // browser can canvas-capture them for the share-card download/native
+    // share. html-to-image's canvas taints on cross-origin images unless
+    // the RESPONSE itself carries proper CORS headers - proxying through
+    // our own server lets us guarantee that, regardless of whether the
+    // original CDN sends permissive headers or not. Allowlisted to known
+    // avatar CDN hosts only, to avoid this becoming an open proxy.
+    if (url.pathname === "/api/image-proxy" && req.method === "GET") {
+      const target = url.searchParams.get("url");
+      if (!target) {
+        return withCors(Response.json({ error: "url is required" }, { status: 400 }), req);
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(target);
+      } catch {
+        return withCors(Response.json({ error: "invalid url" }, { status: 400 }), req);
+      }
+      const ALLOWED_HOSTS = ["pbs.twimg.com", "abs.twimg.com", "imagedelivery.net"];
+      if (parsed.protocol !== "https:" || !ALLOWED_HOSTS.includes(parsed.hostname)) {
+        return withCors(Response.json({ error: "host not allowed" }, { status: 400 }), req);
+      }
+      try {
+        const imgRes = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10000) });
+        if (!imgRes.ok) throw new Error("upstream fetch failed: " + imgRes.status);
+        const body = await imgRes.arrayBuffer();
+        const headers = new Headers();
+        headers.set("Content-Type", imgRes.headers.get("content-type") ?? "image/jpeg");
+        headers.set("Cache-Control", "public, max-age=86400");
+        return withCors(new Response(body, { status: 200, headers }), req);
+      } catch (err) {
+        console.error("[api] image-proxy failed:", err);
+        return withCors(Response.json({ error: "failed to fetch image" }, { status: 502 }), req);
+      }
+    }
+
     if (url.pathname === "/api/leaderboard" && req.method === "GET") {
       try {
         const res = await getLeaderboardController();

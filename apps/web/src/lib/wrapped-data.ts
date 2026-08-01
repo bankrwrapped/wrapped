@@ -176,6 +176,15 @@ export const formatEth = (n: number) => {
   return `${n.toFixed(3)} ETH`;
 };
 
+// Routes an external avatar through our own image-proxy so it can be
+// canvas-captured (share-card download/native share) without hitting the
+// browser's cross-origin canvas-tainting restriction - only needed where
+// a captured image is involved, not for normal display.
+export function proxiedImageUrl(url: string): string {
+  if (url.startsWith(API_URL)) return url;
+  return `${API_URL}/api/image-proxy?url=${encodeURIComponent(url)}`;
+}
+
 export const CHAIN_LABEL: Record<Chain, string> = {
   base: "Base",
   robinhood: "Robinhood",

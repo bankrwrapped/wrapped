@@ -8,7 +8,7 @@ import { ScrambleReveal } from "@/components/wrapped/ScrambleReveal";
 import { TopTokensList } from "@/components/wrapped/TopTokensList";
 import { Button } from "@/components/ui/button";
 import { getArchetype } from "@/lib/archetype";
-import { formatEth, type WrappedProfile } from "@/lib/wrapped-data";
+import { formatEth, proxiedImageUrl, type WrappedProfile } from "@/lib/wrapped-data";
 
 function Kicker({ children }: { children: React.ReactNode }) {
   return (
@@ -507,7 +507,7 @@ export function SceneSummary({ p, onRestart }: { p: WrappedProfile; onRestart: (
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ type: "spring", stiffness: 130, damping: 14, delay: 0.15 }}
-            src={p.avatar}
+            src={proxiedImageUrl(p.avatar)}
             alt=""
             crossOrigin="anonymous"
             className="glass mx-auto -mt-16 size-20 rounded-full object-cover"
