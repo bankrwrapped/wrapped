@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["bun"]
+
+[phases.install]
+cmds = ["bun install"]
+
+[phases.build]
+cmds = ["bunx turbo run build --filter=@bankr-wrapped/api"]
+
+[start]
+cmd = "bun run apps/api/dist/index.js"
