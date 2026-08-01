@@ -81,8 +81,13 @@ Bun.serve({
         const res = await getLeaderboardController();
         return withCors(res);
       } catch (err) {
+        // Never leak the raw technical error to users - log it server-side
+        // for us, show something calm and actionable to them.
         console.error("[api] leaderboard request failed:", err);
-        return withCors(Response.json({ error: "internal error" }, { status: 500 }));
+        return withCors(Response.json(
+          { error: "Couldn't load the leaderboard right now. Try again in a moment." },
+          { status: 500 }
+        ));
       }
     }
 
@@ -98,8 +103,16 @@ Bun.serve({
         const res = await getWrappedController(req, decodeURIComponent(wrappedMatch[1]));
         return withCors(res);
       } catch (err) {
+        // Previously leaked the raw "internal error" string straight to the
+        // UI with no context - most likely cause is resolveWallet() still
+        // throwing outright on a transient Bankr hiccup (unlike the fee
+        // fetches, which degrade gracefully). Give the user something
+        // calm and actionable instead, log the real error for us.
         console.error("[api] request failed:", err);
-        return withCors(Response.json({ error: "internal error" }, { status: 500 }));
+        return withCors(Response.json(
+          { error: "Couldn't load that Wrapped right now — Bankr's service might be slow or briefly unavailable. Try again in a moment." },
+          { status: 500 }
+        ));
       }
     }
 

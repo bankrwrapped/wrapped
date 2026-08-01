@@ -265,9 +265,16 @@ function Index() {
           </p>
 
           {error && (
-            <p className="animate-rise text-sm text-destructive" role="alert">
-              {error}
-            </p>
+            <div className="animate-rise glass space-y-2 rounded-2xl px-4 py-3" role="alert">
+              <p className="text-sm text-destructive">{error}</p>
+              <button
+                type="button"
+                onClick={() => void run(handle)}
+                className="text-sm font-medium text-accent underline-offset-4 hover:underline"
+              >
+                Try again
+              </button>
+            </div>
           )}
 
           <Link

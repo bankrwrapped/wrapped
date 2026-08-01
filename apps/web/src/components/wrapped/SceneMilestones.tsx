@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Counter } from "@/components/wrapped/Counter";
+import { ScrambleReveal } from "@/components/wrapped/ScrambleReveal";
 
 // Total runtime ~13s. Each phase starts at its own offset; nothing before
 // its offset is mounted, so animations replay correctly if this scene is
@@ -7,9 +7,9 @@ import { Counter } from "@/components/wrapped/Counter";
 const PHASE_TIMINGS_MS = {
   logo: 0,
   volume: 1500,
-  chains: 4500,
-  paidOut: 6500,
-  cta: 9500,
+  chains: 4700,
+  paidOut: 6700,
+  cta: 9700,
 };
 const TOTAL_DURATION_MS = 13000;
 
@@ -17,6 +17,9 @@ const CHAINS: Array<{ key: "base" | "robinhood"; label: string; logo: string }> 
   { key: "base", label: "Base", logo: "/base-logo.png" },
   { key: "robinhood", label: "Robinhood", logo: "/robinhood-logo.png" },
 ];
+
+const VOLUME_TEXT = "$5.01B+";
+const PAID_OUT_TEXT = "$20.19M+";
 
 export function SceneMilestones({ onDone }: { onDone: () => void }) {
   const [progress, setProgress] = useState(0);
@@ -63,6 +66,11 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
       <div className="pointer-events-none absolute -left-24 top-1/4 size-[28rem] animate-drift rounded-full bg-primary/25 blur-[120px]" />
       <div className="pointer-events-none absolute -right-24 bottom-0 size-[26rem] animate-glow-pulse rounded-full bg-accent/20 blur-[130px]" />
 
+      {/* Quiet, persistent brand mark, top-left */}
+      <div className="glass animate-scene-in absolute left-5 top-5 z-20 flex size-9 items-center justify-center overflow-hidden rounded-full">
+        <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
+      </div>
+
       <div className="relative z-10 mx-auto flex w-full max-w-xl flex-1 flex-col px-5 pb-8 pt-5">
         <div className="h-1 overflow-hidden rounded-full bg-foreground/15">
           <div
@@ -77,16 +85,25 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
           </p>
 
           {showVolume && (
-            <div key="volume" className="animate-scene-in space-y-3">
+            <div key="volume" className="relative space-y-3">
               <div className="mx-auto h-px w-10 bg-foreground/25" />
-              <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">
+              <p className="animate-rise text-sm uppercase tracking-[0.3em] text-muted-foreground">
                 Trading Volume Across All Chains
               </p>
-              <p className="animate-rise font-display text-4xl font-extrabold sm:text-5xl" style={{ animationDelay: "80ms" }}>
-                <span className="text-gradient">
-                  <Counter value={5.01} format={(v) => `$${v.toFixed(2)}B+`} duration={2500} />
-                </span>
-              </p>
+              <div className="relative">
+                {/* Ghost duplicate - oversized, blurred, drifting behind the real number for depth */}
+                <p
+                  aria-hidden
+                  className="animate-drift pointer-events-none absolute inset-0 select-none font-display text-7xl font-extrabold text-primary/15 blur-2xl sm:text-8xl"
+                >
+                  {VOLUME_TEXT}
+                </p>
+                <p className="relative font-display text-4xl font-extrabold sm:text-5xl">
+                  <span className="text-gradient">
+                    <ScrambleReveal text={VOLUME_TEXT} delay={150} />
+                  </span>
+                </p>
+              </div>
             </div>
           )}
 
@@ -95,8 +112,8 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
               {CHAINS.map((c, i) => (
                 <li
                   key={c.key}
-                  className="glass flex animate-rise items-center gap-2 rounded-full px-4 py-2"
-                  style={{ animationDelay: `${i * 250}ms` }}
+                  className="glass animate-slide-out flex items-center gap-2 rounded-full px-4 py-2"
+                  style={{ animationDelay: `${i * 220}ms` }}
                 >
                   <img src={c.logo} alt="" className="size-5 shrink-0 rounded-full" aria-hidden />
                   <span className="text-sm font-medium">{c.label}</span>
@@ -106,14 +123,22 @@ export function SceneMilestones({ onDone }: { onDone: () => void }) {
           )}
 
           {showPaidOut && (
-            <div key="paidOut" className="animate-scene-in space-y-3">
+            <div key="paidOut" className="relative space-y-3">
               <div className="mx-auto h-px w-10 bg-foreground/25" />
-              <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">
+              <p className="animate-rise text-sm uppercase tracking-[0.3em] text-muted-foreground">
                 Paid Out to Builders &amp; Creators
               </p>
-              <p className="animate-rise font-display text-3xl font-extrabold text-accent sm:text-4xl" style={{ animationDelay: "80ms" }}>
-                <Counter value={20.19} format={(v) => `$${v.toFixed(2)}M+`} duration={2200} />
-              </p>
+              <div className="relative">
+                <p
+                  aria-hidden
+                  className="animate-drift pointer-events-none absolute inset-0 select-none font-display text-6xl font-extrabold text-accent/15 blur-2xl sm:text-7xl"
+                >
+                  {PAID_OUT_TEXT}
+                </p>
+                <p className="relative font-display text-3xl font-extrabold text-accent sm:text-4xl">
+                  <ScrambleReveal text={PAID_OUT_TEXT} delay={150} />
+                </p>
+              </div>
             </div>
           )}
 
