@@ -237,3 +237,13 @@
 body {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 8px rgba(0, 0, 0, 0.25);
 }
+
+/* The global body text-shadow above breaks gradient-clipped text
+   (.text-gradient uses background-clip:text + transparent fill) - shadows
+   render against the glyph outline separately from the invisible fill,
+   producing a fuzzy colored halo instead of a clean shadow. Gradient text
+   already has strong inherent contrast from its own color against the
+   scrim, so it doesn't need the shadow anyway - just needs it turned off. */
+.text-gradient {
+  text-shadow: none;
+}
