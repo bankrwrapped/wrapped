@@ -390,6 +390,67 @@ async function attachRank(row: WrappedCacheRow): Promise<WrappedCacheRow> {
   return { ...row, rank, totalUsers, percentile };
 }
 
+// If a refresh partially fails (e.g. Bankr's creator-fees 500ing), the
+// fresh payload comes back with that side genuinely zeroed out - correct
+// for what THIS fetch got, but blindly overwriting the cache with it means
+// a transient upstream failure permanently stomps last-known-good numbers
+// for anyone else who searches this wallet in the following minutes.
+// Confirmed happening in production (basedkabeer, 2026-08-02 22:29 UTC:
+// creator-fees 500'd, card showed 0 ETH / 0 tokens launched, and that zero
+// got written into our own DB). Fix: on a degraded side, keep the
+// PREVIOUS cached payload's values for that side instead of the fresh
+// zeroed ones, while still taking whatever DID fetch successfully.
+function mergeWithCache(
+  fresh: WrappedPayload,
+  previous: WrappedPayload | null
+): WrappedPayload {
+  if (!previous) return fresh;
+
+  const merged: WrappedPayload = { ...fresh };
+
+  if (fresh.meta.creatorFeesStatus === "unavailable" && previous.meta.creatorFeesStatus === "ok") {
+    console.log("[wrappedService] mergeWithCache: creator-fees degraded this fetch, keeping previous cached creator data");
+    merged.tokens = previous.tokens;
+    merged.dailyEarnings = previous.dailyEarnings;
+    merged.bestDay = previous.bestDay;
+    merged.longestStreakDays = previous.longestStreakDays;
+    merged.summary = { ...fresh.summary, tokensLaunched: previous.summary.tokensLaunched };
+    merged.earnings = {
+      ...fresh.earnings,
+      creatorEarnings: previous.earnings.creatorEarnings,
+      creatorEarningsEth: previous.earnings.creatorEarningsEth,
+      total: previous.earnings.creatorEarnings + fresh.earnings.pleaseBroEarnings,
+      totalEth: previous.earnings.creatorEarningsEth + fresh.earnings.pleaseBroEarningsEth,
+    };
+    merged.meta = { ...fresh.meta, creatorFeesStatus: "ok" };
+  }
+
+  if (fresh.meta.beneficiaryFeesStatus === "unavailable" && previous.meta.beneficiaryFeesStatus === "ok") {
+    console.log("[wrappedService] mergeWithCache: beneficiary-fees degraded this fetch, keeping previous cached please-bro data");
+    merged.pleaseBroTokens = previous.pleaseBroTokens;
+    merged.earnings = {
+      ...merged.earnings,
+      pleaseBroEarnings: previous.earnings.pleaseBroEarnings,
+      pleaseBroEarningsEth: previous.earnings.pleaseBroEarningsEth,
+      total: merged.earnings.total - fresh.earnings.pleaseBroEarnings + previous.earnings.pleaseBroEarnings,
+      totalEth: merged.earnings.totalEth - fresh.earnings.pleaseBroEarningsEth + previous.earnings.pleaseBroEarningsEth,
+    };
+    merged.meta = { ...merged.meta, beneficiaryFeesStatus: "ok" };
+  }
+
+  // Unclaimed/claimCount are wallet-level aggregates spanning both sides -
+  // if EITHER side degraded, these can't be trusted fresh either, so fall
+  // back to the previous cached values in that case too.
+  const eitherDegraded =
+    fresh.meta.creatorFeesStatus === "unavailable" || fresh.meta.beneficiaryFeesStatus === "unavailable";
+  if (eitherDegraded && (previous.meta.creatorFeesStatus === "ok" && previous.meta.beneficiaryFeesStatus === "ok")) {
+    merged.claimable = previous.claimable;
+    merged.claimCount = previous.claimCount;
+  }
+
+  return merged;
+}
+
 async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
   const match = await resolveWallet(handle);
   if (!match) return null;
@@ -403,7 +464,8 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
     return attachRank(cached);
   }
 
-  const payload = await fetchFromBankr(match);
+  const fetched = await fetchFromBankr(match);
+  const payload = mergeWithCache(fetched, cached?.payload ?? null);
   console.log("[wrappedService] upserting to db");
   const row = await wrappedCacheRepository.upsert(
     match.evmAddress,
