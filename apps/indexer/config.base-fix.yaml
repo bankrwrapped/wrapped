@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+#
+# Module 2+3 — Base + Robinhood Chain Indexer (Doppler)
+#
+# CORRECTED (v2) 2026-08-07: V3 uses two-tier declaration — contracts:
+# define event signatures ONCE globally, then chains: reference them by
+# name with per-chain addresses. My first pass duplicated contract
+# definitions per chain (V2-style), which V3 rejects as "Duplicate
+# contract names detected." Per docs.envio.dev/docs/HyperIndex/multichain-indexing.
+
+name: bankr-wrapped-base-indexer
+
+contracts:
+  - name: Airlock
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Create(address asset, address indexed numeraire, address initializer, address poolOrHook)"
+        name: Create
+
+  - name: PoolManager
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)"
+        name: Initialize
+      - event: "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
+        name: Swap
+        field_selection:
+          transaction_fields:
+            - hash
+
+  - name: StreamableFeesLockerV2
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Collect(bytes32 indexed poolId, uint256 fees0, uint256 fees1)"
+        name: Collect
+        field_selection:
+          transaction_fields:
+            - hash
+      - event: "Release(bytes32 indexed poolId, address indexed beneficiary, uint256 fees0, uint256 fees1)"
+        name: Release
+        field_selection:
+          transaction_fields:
+            - hash
+
+chains:
+  - id: 8453 # Base mainnet
+    start_block: 28415516 # placeholder — tighten to Airlock's real deployment block
+    contracts:
+      - name: Airlock
+        address:
+          - "0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12"
+      - name: PoolManager
+        address:
+          - "0x498581fF718922c3f8e6A244956aF099B2652b2b"
+      - name: StreamableFeesLockerV2
+        address:
+          - "0xce3212e6536f33cd6fbfee265224131353ca3d47"
+
+  - id: 4663 # Robinhood Chain mainnet — Module 3 addition
+    skip: true
+    # No HyperSync for this chain (OQ6) — RPC needed for both
+    # historical sync and live tracking.
+    rpc:
+      - url: https://rpc.mainnet.chain.robinhood.com
+        for: sync
+      - url: https://rpc.mainnet.chain.robinhood.com
+        for: realtime
+    start_block: 0 # chain only weeks old (OQ7) — measure real backfill cost when run
+    contracts:
+      - name: Airlock
+        address:
+          - "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862"
+      - name: PoolManager
+        address:
+          - "0x8366a39CC670B4001A1121B8F6A443A643e40951"
+      - name: StreamableFeesLockerV2
+        address:
+          - "0x7b6147ac3f615bdb764e7ebd5f517dac1ad163b8"

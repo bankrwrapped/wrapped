@@ -32,7 +32,7 @@ function tooManyRequests(retryAfterSeconds: number): Response {
 // Falls back to the raw socket IP only when the header is absent (local
 // dev with no proxy in front) - Railway always sets this header in
 // production, so this fallback never fires there.
-function getClientIp(req: Request, server: Bun.Server): string {
+function getClientIp(req: Request, server: Bun.Server<undefined>): string {
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) {
     const first = forwarded.split(",")[0]?.trim();
@@ -61,18 +61,18 @@ Bun.serve({
       const clientIp = getClientIp(req, server);
       const limit = checkSearchSuggestRouteLimit(clientIp);
       if (!limit.allowed) {
-        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
+        return withCors(tooManyRequests(limit.retryAfterSeconds));
       }
       const query = url.searchParams.get("query")?.trim() ?? "";
       if (query.length < 2) {
-        return withCors(Response.json({ results: [] }), req);
+        return withCors(Response.json({ results: [] }));
       }
       try {
         const results = await wrappedService.searchHandles(query);
-        return withCors(Response.json({ results: results.slice(0, 8) }), req);
+        return withCors(Response.json({ results: results.slice(0, 8) }));
       } catch (err) {
         console.error("[api] search request failed:", err);
-        return withCors(Response.json({ results: [] }), req);
+        return withCors(Response.json({ results: [] }));
       }
     }
 
@@ -86,17 +86,17 @@ Bun.serve({
     if (url.pathname === "/api/image-proxy" && req.method === "GET") {
       const target = url.searchParams.get("url");
       if (!target) {
-        return withCors(Response.json({ error: "url is required" }, { status: 400 }), req);
+        return withCors(Response.json({ error: "url is required" }, { status: 400 }));
       }
       let parsed: URL;
       try {
         parsed = new URL(target);
       } catch {
-        return withCors(Response.json({ error: "invalid url" }, { status: 400 }), req);
+        return withCors(Response.json({ error: "invalid url" }, { status: 400 }));
       }
       const ALLOWED_HOSTS = ["pbs.twimg.com", "abs.twimg.com", "imagedelivery.net"];
       if (parsed.protocol !== "https:" || !ALLOWED_HOSTS.includes(parsed.hostname)) {
-        return withCors(Response.json({ error: "host not allowed" }, { status: 400 }), req);
+        return withCors(Response.json({ error: "host not allowed" }, { status: 400 }));
       }
       try {
         const imgRes = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10000) });
@@ -105,17 +105,17 @@ Bun.serve({
         const headers = new Headers();
         headers.set("Content-Type", imgRes.headers.get("content-type") ?? "image/jpeg");
         headers.set("Cache-Control", "public, max-age=86400");
-        return withCors(new Response(body, { status: 200, headers }), req);
+        return withCors(new Response(body, { status: 200, headers }));
       } catch (err) {
         console.error("[api] image-proxy failed:", err);
-        return withCors(Response.json({ error: "failed to fetch image" }, { status: 502 }), req);
+        return withCors(Response.json({ error: "failed to fetch image" }, { status: 502 }));
       }
     }
 
     if (url.pathname === "/api/leaderboard" && req.method === "GET") {
       try {
         const res = await getLeaderboardController();
-        return withCors(res, req);
+        return withCors(res);
       } catch (err) {
         // Never leak the raw technical error to users - log it server-side
         // for us, show something calm and actionable to them.
@@ -123,7 +123,7 @@ Bun.serve({
         return withCors(Response.json(
           { error: "Couldn't load the leaderboard right now. Try again in a moment." },
           { status: 500 }
-        ), req);
+        ));
       }
     }
 
@@ -132,12 +132,12 @@ Bun.serve({
       const clientIp = getClientIp(req, server);
       const limit = checkWrappedRouteLimit(clientIp);
       if (!limit.allowed) {
-        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
+        return withCors(tooManyRequests(limit.retryAfterSeconds));
       }
 
       try {
         const res = await getWrappedController(req, decodeURIComponent(wrappedMatch[1]));
-        return withCors(res, req);
+        return withCors(res);
       } catch (err) {
         // Previously leaked the raw "internal error" string straight to the
         // UI with no context - most likely cause is resolveWallet() still
@@ -148,11 +148,11 @@ Bun.serve({
         return withCors(Response.json(
           { error: "Couldn't load that Wrapped right now — Bankr's service might be slow or briefly unavailable. Try again in a moment." },
           { status: 500 }
-        ), req);
+        ));
       }
     }
 
-    return withCors(new Response("Not found", { status: 404 }), req);
+    return withCors(new Response("Not found", { status: 404 }));
   },
 });
 

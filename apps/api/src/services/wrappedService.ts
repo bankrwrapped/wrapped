@@ -7,7 +7,7 @@ import type {
   WrappedCacheRow,
   WrappedTokenEntry,
 } from "@bankr-wrapped/shared";
-import { wrappedCacheRepository } from "../repositories/wrappedCacheRepository";
+import { wrappedCacheRepository, type PersistedWrappedRow } from "../repositories/wrappedCacheRepository";
 import { bankrRateLimiter } from "../utils/bankrRateLimiter";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
@@ -384,7 +384,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   };
 }
 
-async function attachRank(row: WrappedCacheRow): Promise<WrappedCacheRow> {
+async function attachRank(row: PersistedWrappedRow): Promise<WrappedCacheRow> {
   const { rank, totalUsers } = await wrappedCacheRepository.getRank(row.walletAddress);
   const percentile = totalUsers > 0 ? Math.ceil((rank / totalUsers) * 100) : 100;
   return { ...row, rank, totalUsers, percentile };

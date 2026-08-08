@@ -8,7 +8,13 @@ interface ProfileRow {
   updated_at: string;
 }
 
-function toCacheRow(row: ProfileRow): WrappedCacheRow {
+// The subset of WrappedCacheRow this repository actually persists/returns.
+// rank/totalUsers/percentile are deliberately excluded here - per
+// WrappedCacheRow's own doc comment, those are computed live on every
+// request (see wrappedService.attachRank), never persisted, so this
+// repository never has real values for them and shouldn't claim to.
+export type PersistedWrappedRow = Omit<WrappedCacheRow, "rank" | "totalUsers" | "percentile">;
+function toCacheRow(row: ProfileRow): PersistedWrappedRow {
   return {
     walletAddress: row.wallet_address,
     username: row.username,
@@ -18,7 +24,7 @@ function toCacheRow(row: ProfileRow): WrappedCacheRow {
 }
 
 export const wrappedCacheRepository = {
-  async findByWallet(wallet: string): Promise<WrappedCacheRow | null> {
+  async findByWallet(wallet: string): Promise<PersistedWrappedRow | null> {
     const rows = (await db`
       select wallet_address, username, payload, updated_at
       from wrapped_profiles
@@ -34,7 +40,7 @@ export const wrappedCacheRepository = {
     wallet: string,
     username: string,
     payload: WrappedPayload
-  ): Promise<WrappedCacheRow> {
+  ): Promise<PersistedWrappedRow> {
     const now = new Date();
 
     const savedRow = await db.begin(async (tx) => {

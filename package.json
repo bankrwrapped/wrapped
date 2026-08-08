@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "turbo": "^2.3.0"
+  },
+  "dependencies": {
+    "envio": "^3.6.0"
   }
 }
