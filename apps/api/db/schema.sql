@@ -46,3 +46,64 @@ create index if not exists idx_wrapped_tokens_wallet
   on wrapped_tokens (wallet_address);
 create index if not exists idx_wrapped_tokens_fees_eth
   on wrapped_tokens (fees_earned_eth desc);
+
+-- ============================================================
+-- Module 6: On-Chain Indexer — aggregated/tracking tables only.
+-- Envio owns its own raw-event schema in a SEPARATE Postgres
+-- instance (auto-generated from schema.graphql) — do not add
+-- raw Swap/Release/Collect tables here. See playbook §4.
+-- ============================================================
+
+-- One row per contract this indexer watches. New rows (e.g. Clanker)
+-- get added without a schema change.
+create table if not exists indexed_contracts (
+  id            bigserial primary key,
+  chain         text not null check (chain in ('base', 'robinhood')),
+  contract_type text not null,
+  address       text not null,
+  source        text not null check (source in ('doppler', 'clanker')),
+  created_at    timestamptz not null default now(),
+  unique (chain, contract_type, address)
+);
+
+-- Per-token identity + backfill/checkpoint status. Module 7 and
+-- Module 9 read/write this — it does NOT store raw events.
+create table if not exists indexed_tokens (
+  token_address              text not null,
+  chain                      text not null check (chain in ('base', 'robinhood')),
+  pool_id                    text,
+  source                     text not null check (source in ('doppler', 'clanker')),
+  deployer_wallet            text,
+  first_seen_block           bigint,
+  backfill_status            text not null default 'pending'
+                               check (backfill_status in ('pending', 'in_progress', 'complete', 'failed')),
+  backfill_checkpoint_block  bigint,
+  last_refreshed_at          timestamptz,
+  primary key (chain, token_address)
+);
+
+-- Pre-aggregated per-token lifetime totals — what Module 7's provider
+-- actually reads. Populated by Module 9's sync job against Envio's
+-- GraphQL API, not by a live join against raw event tables.
+create table if not exists token_volume_summary (
+  chain            text not null check (chain in ('base', 'robinhood')),
+  token_address    text not null,
+  total_volume_usd numeric not null default 0,
+  swap_count       integer not null default 0,
+  last_updated_at  timestamptz not null default now(),
+  primary key (chain, token_address)
+);
+
+
+-- Added by Module 5 (pricing service). Historical USD price cache, keyed by
+-- hourly bucket - see priceCacheRepository.ts for bucketing rationale.
+-- Module 6 may relocate/renumber this once real migration tooling lands;
+-- kept idempotent (create if not exists) so it's safe either way.
+create table if not exists price_cache (
+  chain             text not null check (chain in ('base', 'robinhood')),
+  token_address     text not null,
+  timestamp_bucket  timestamptz not null,
+  price_usd         numeric not null,
+  created_at        timestamptz not null default now(),
+  primary key (chain, token_address, timestamp_bucket)
+);
