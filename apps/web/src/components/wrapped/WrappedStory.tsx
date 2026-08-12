@@ -168,4 +168,4 @@ export function WrappedStory({
       />
     </div>
   );
-}a
+}
