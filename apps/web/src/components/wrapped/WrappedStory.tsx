@@ -79,7 +79,7 @@ export function WrappedStory({
 
   const scenes = [
     <SceneIdentity key="1" p={profile} />,
-    <SceneContribution key="2" />,
+    <SceneContribution key="2" p={profile} />,
     <SceneLaunched key="3" p={profile} />,
     <ScenePleaseBro key="4" p={profile} />,
     <SceneEarnings key="5" p={profile} />,
