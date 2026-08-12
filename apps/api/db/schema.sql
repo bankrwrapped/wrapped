@@ -107,3 +107,16 @@ create table if not exists price_cache (
   created_at        timestamptz not null default now(),
   primary key (chain, token_address, timestamp_bucket)
 );
+
+-- Added by Module 7 (2026-08-08), filling a gap: walletBackfillRequestsRepository.ts
+-- (Module 9, item 19) queries this table but it was never actually added to
+-- schema.sql -- confirmed missing via direct grep, not assumed. Shape matches
+-- the repository's real query exactly (wallet_address, chain, token_address,
+-- unique constraint the repository's ON CONFLICT already assumes).
+create table if not exists wallet_backfill_requests (
+  wallet_address  text not null,
+  chain           text not null check (chain in ('base', 'robinhood')),
+  token_address   text not null,
+  requested_at    timestamptz not null default now(),
+  primary key (wallet_address, chain, token_address)
+);

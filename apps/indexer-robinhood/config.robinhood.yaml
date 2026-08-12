@@ -1,12 +1,15 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 #
-# Module 2+3 — Base + Robinhood Chain Indexer (Doppler)
+# Module 3 — Robinhood Chain Indexer (Doppler), isolated on purpose.
+# SPLIT OUT 2026-08-08 after config.yaml got overwritten by Module 2/4's
+# Base+Clanker merge (their own header note confirms Robinhood was
+# "intentionally omitted" from that shared file). Postgres data itself
+# (schema `public`) was untouched — only this config file was lost —
+# reconstructed here from Module 3's confirmed real values.
 #
-# CORRECTED (v2) 2026-08-07: V3 uses two-tier declaration — contracts:
-# define event signatures ONCE globally, then chains: reference them by
-# name with per-chain addresses. My first pass duplicated contract
-# definitions per chain (V2-style), which V3 rejects as "Duplicate
-# contract names detected." Per docs.envio.dev/docs/HyperIndex/multichain-indexing.
+# Run this file explicitly: `bunx envio dev --config config.robinhood.yaml`
+# Do NOT let other modules merge into this file. Do NOT merge this back
+# into the shared config.yaml — that's what caused the collision.
 
 name: bankr-wrapped-base-indexer
 
@@ -43,29 +46,15 @@ contracts:
             - hash
 
 chains:
-  - id: 8453 # Base mainnet
-    start_block: 28415516 # placeholder — tighten to Airlock's real deployment block
-    contracts:
-      - name: Airlock
-        address:
-          - "0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12"
-      - name: PoolManager
-        address:
-          - "0x498581fF718922c3f8e6A244956aF099B2652b2b"
-      - name: StreamableFeesLockerV2
-        address:
-          - "0xce3212e6536f33cd6fbfee265224131353ca3d47"
-
-  - id: 4663 # Robinhood Chain mainnet — Module 3 addition
-    skip: true
-    # No HyperSync for this chain (OQ6) — RPC needed for both
-    # historical sync and live tracking.
+  - id: 4663 # Robinhood Chain mainnet
+    start_block: 646829 # Airlock's real deployment block, confirmed via robinhoodchain.blockscout.com
     rpc:
-      - url: https://rpc.mainnet.chain.robinhood.com
+      - url: https://rpc.arrowrpc.com
         for: sync
       - url: https://rpc.mainnet.chain.robinhood.com
+        for: sync
+      - url: https://rpc.arrowrpc.com
         for: realtime
-    start_block: 0 # chain only weeks old (OQ7) — measure real backfill cost when run
     contracts:
       - name: Airlock
         address:

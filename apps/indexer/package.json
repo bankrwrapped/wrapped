@@ -10,5 +10,9 @@
   },
   "dependencies": {
     "envio": "^3.6.0"
+  },
+  "devDependencies": {
+    "@envio-dev/hypersync-client": "^1.4.0",
+    "tsx": "^4.23.12"
   }
 }

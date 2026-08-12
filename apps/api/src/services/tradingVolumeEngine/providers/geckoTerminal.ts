@@ -1,11 +1,11 @@
 import type { ChainId, ProviderVolumeResult, TokenRef } from "../types";
 
-const BASE_URL = "https://api.geckoterminal.com/api/v2";
+export const BASE_URL = "https://api.geckoterminal.com/api/v2";
 
 // Verified live 2026-08-06 against GeckoTerminal's own pool-listing pages:
 // geckoterminal.com/base/pools and geckoterminal.com/robinhood/pools both
 // resolve. "robinhood-chain" (the prior placeholder) does not.
-const NETWORK_SLUGS: Record<ChainId, string> = {
+export const NETWORK_SLUGS: Record<ChainId, string> = {
   base: "base",
   robinhood: "robinhood",
 };
@@ -53,7 +53,7 @@ async function throttle(): Promise<void> {
  * Every attempt (including retries) goes through throttle() first, so
  * retries themselves can't cause a burst that trips the limit again.
  */
-async function fetchWithRateLimitRetry(url: string): Promise<Response | null> {
+export async function fetchWithRateLimitRetry(url: string): Promise<Response | null> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
 
