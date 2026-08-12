@@ -37,3 +37,8 @@ dist-ssr
 
 # Turborepo build cache
 .turbo/
+
+# Environment files — never commit real secrets
+.env
+.env.*
+!.env.example
