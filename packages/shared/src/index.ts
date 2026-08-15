@@ -109,6 +109,16 @@ export interface WrappedTokenEntry {
   // decision made after a session of confusing price-conversion swings:
   // ETH is an objective fact with no pricing-methodology debate attached.
   feesEarnedEth: number;
+  // Carried straight through from Bankr's raw CreatorFeeTokenEntry/
+  // BeneficiaryFeeTokenEntry.source. Kept as a loose string here (matching
+  // the raw API type) rather than a strict union - the Trading Volume
+  // Engine's TokenRef normalizes it into a real TokenSource ("doppler" |
+  // "clanker" | "unknown") at the point of use (wrappedService.
+  // buildVolumeTokenRefs), not here. Added specifically to fix a real bug:
+  // without this field, every token hit the indexer's cold-start path with
+  // no real source, which the DB's indexed_tokens_source_check constraint
+  // correctly rejects (only 'doppler'/'clanker' are valid there).
+  source: string;
 }
 
 export interface WrappedUser {
@@ -120,6 +130,20 @@ export interface WrappedUser {
 }
 
 export type FeesFetchStatus = "ok" | "unavailable";
+
+export interface WrappedTradingVolume {
+  totalVolumeUsd: number;
+  // "pending" = never successfully computed yet for this wallet.
+  // "ok" = at least one computation has completed and this is real data.
+  status: "pending" | "ok";
+  isComplete: boolean;
+  tokensTotal: number;
+  tokensComplete: number;
+  tokensInProgress: number;
+  tokensPending: number;
+  tokensFailed: number;
+  updatedAt: string; // ISO -- when this was last (re)computed
+}
 
 export interface WrappedPayload {
   user: WrappedUser;
@@ -165,6 +189,14 @@ export interface WrappedPayload {
     creatorFeesStatus: FeesFetchStatus;
     beneficiaryFeesStatus: FeesFetchStatus;
   };
+  // Computed out-of-band by the Trading Volume Engine (item 20,
+  // getBestAvailableVolume) - NEVER computed synchronously inside a
+  // request. Seeded from the previous cached value (or a "pending" stub
+  // on first-ever fetch) and refreshed by a background job triggered
+  // from wrappedService.getWrapped. Can legitimately be incomplete
+  // (isComplete: false) - the frontend must handle that state, not
+  // assume totalVolumeUsd is final.
+  tradingVolume: WrappedTradingVolume;
 }
 
 export interface WrappedCacheRow {

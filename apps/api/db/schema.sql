@@ -75,6 +75,7 @@ create table if not exists indexed_tokens (
   source                     text not null check (source in ('doppler', 'clanker')),
   deployer_wallet            text,
   first_seen_block           bigint,
+  decimals                   integer,
   backfill_status            text not null default 'pending'
                                check (backfill_status in ('pending', 'in_progress', 'complete', 'failed')),
   backfill_checkpoint_block  bigint,

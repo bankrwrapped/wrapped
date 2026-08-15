@@ -9,10 +9,123 @@ import type {
 } from "@bankr-wrapped/shared";
 import { wrappedCacheRepository, type PersistedWrappedRow } from "../repositories/wrappedCacheRepository";
 import { bankrRateLimiter } from "../utils/bankrRateLimiter";
+import type { WrappedTradingVolume } from "@bankr-wrapped/shared";
+import { getBestAvailableVolume } from "./tradingVolumeEngine/getBestAvailableVolume";
+import type { TokenRef, ChainId, TokenSource } from "./tradingVolumeEngine/types";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
 const FETCH_TIMEOUT_MS = 25000; // WSL2 Bun cold-start cost, fine for Railway too
+
+// How stale an INCOMPLETE trading-volume result must be before we'll
+// retry it. Deliberately much longer than STALE_MS (2min, for the fast
+// Bankr fee data) - the volume engine is expensive (multi-minute for
+// large wallets, see Module 7's measured Surplus timings) and re-firing
+// it every 2 minutes for a wallet with pending tokens would waste real
+// provider rate-limit budget for no benefit.
+const VOLUME_RECHECK_MS = 15 * 60 * 1000; // 15 minutes
+
+const PENDING_TRADING_VOLUME: WrappedTradingVolume = {
+  totalVolumeUsd: 0,
+  status: "pending",
+  isComplete: false,
+  tokensTotal: 0,
+  tokensComplete: 0,
+  tokensInProgress: 0,
+  tokensPending: 0,
+  tokensFailed: 0,
+  updatedAt: new Date(0).toISOString(),
+};
+
+// Prevents duplicate concurrent computations for the same wallet if
+// multiple requests land while a background run is still in flight.
+const volumeComputationsInFlight = new Set<string>();
+
+// Bankr's raw source field is a loose string (see CreatorFeeTokenEntry/
+// BeneficiaryFeeTokenEntry). The indexer's indexed_tokens table has a real
+// DB constraint accepting ONLY 'doppler'/'clanker' - confirmed live,
+// 2026-08-15 (indexed_tokens_source_check). Anything else MUST normalize
+// to "unknown" and must NOT be passed through as a raw string, or the
+// cold-start backfill write fails with a Postgres constraint violation for
+// every single token (real bug, found via live wallet test against
+// basedkabeer's 53 tokens - every one hit this before this fix).
+function normalizeSource(raw: string): TokenSource {
+  if (raw === "doppler" || raw === "clanker") return raw;
+  console.warn(
+    "[wrappedService] normalizeSource: unrecognized token source \"" + raw + "\" -- treating as unknown"
+  );
+  return "unknown";
+}
+
+function buildVolumeTokenRefs(wallet: string, tokens: WrappedTokenEntry[]): TokenRef[] {
+  const refs: TokenRef[] = [];
+  for (const t of tokens) {
+    // Engine only supports these two chains (see tradingVolumeEngine/types.ts).
+    if (t.chain !== "base" && t.chain !== "robinhood") continue;
+    refs.push({
+      address: t.tokenAddress,
+      chain: t.chain as ChainId,
+      symbol: t.symbol,
+      name: t.name,
+      walletAddress: wallet,
+      source: normalizeSource(t.source),
+    });
+  }
+  return refs;
+}
+
+function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]): void {
+  if (volumeComputationsInFlight.has(wallet)) {
+    console.log("[wrappedService] triggerTradingVolumeRefresh: already in flight for " + wallet + ", skipping");
+    return;
+  }
+  const refs = buildVolumeTokenRefs(wallet, tokens);
+  if (refs.length === 0) {
+    console.log("[wrappedService] triggerTradingVolumeRefresh: no base/robinhood tokens for " + wallet + ", skipping");
+    return;
+  }
+
+  volumeComputationsInFlight.add(wallet);
+  console.log("[wrappedService] triggerTradingVolumeRefresh: starting background compute for " + wallet + ", " + refs.length + " token(s)");
+
+  // Deliberately NOT awaited by the caller - this can take minutes for a
+  // large wallet (measured, not assumed - see Module 7's Surplus test:
+  // ~6-49s per token, serial). Blocking a live request on this would blow
+  // past any reasonable HTTP timeout. Result is persisted independently
+  // when it finishes; the NEXT request picks it up.
+  getBestAvailableVolume(wallet, refs)
+    .then(async (result) => {
+      const tradingVolume: WrappedTradingVolume = {
+        totalVolumeUsd: result.summary.totalVolumeUsd,
+        status: "ok",
+        isComplete: result.isComplete,
+        tokensTotal: result.tokensTotal,
+        tokensComplete: result.tokensComplete,
+        tokensInProgress: result.tokensInProgress,
+        tokensPending: result.tokensPending,
+        tokensFailed: result.tokensFailed,
+        updatedAt: new Date().toISOString(),
+      };
+      await wrappedCacheRepository.updateTradingVolume(wallet, tradingVolume);
+      console.log(
+        "[wrappedService] triggerTradingVolumeRefresh: done for " + wallet +
+        ", total=$" + tradingVolume.totalVolumeUsd + ", isComplete=" + tradingVolume.isComplete
+      );
+    })
+    .catch((err) => {
+      console.error("[wrappedService] triggerTradingVolumeRefresh: failed for " + wallet, err);
+    })
+    .finally(() => {
+      volumeComputationsInFlight.delete(wallet);
+    });
+}
+
+function shouldRefreshTradingVolume(tv: WrappedTradingVolume | undefined): boolean {
+  if (!tv || tv.status === "pending") return true;
+  if (tv.isComplete) return false; // fully resolved, nothing to gain from recomputing
+  const age = Date.now() - Date.parse(tv.updatedAt);
+  return age >= VOLUME_RECHECK_MS;
+}
 
 function pickBestMatch(
   query: string,
@@ -252,6 +365,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       symbol: t.symbol,
       chain: t.chain,
       feesEarnedEth: feeWeth,
+      source: t.source,
     };
   });
 
@@ -263,6 +377,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       symbol: t.symbol,
       chain: t.chain,
       feesEarnedEth: feeWeth,
+      source: t.source,
     };
   });
 
@@ -381,6 +496,11 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       creatorFeesStatus: creatorResult.status,
       beneficiaryFeesStatus: beneficiaryResult.status,
     },
+    // Always seeded as pending here - fetchFromBankr never computes this
+    // itself (see triggerTradingVolumeRefresh). getWrapped/mergeWithCache
+    // are responsible for carrying forward a real previously-computed
+    // value instead of letting this stub overwrite it.
+    tradingVolume: PENDING_TRADING_VOLUME,
   };
 }
 
@@ -407,6 +527,17 @@ function mergeWithCache(
   if (!previous) return fresh;
 
   const merged: WrappedPayload = { ...fresh };
+
+  // Trading volume is computed and persisted OUT OF BAND by a background
+  // job (triggerTradingVolumeRefresh), independent of this fetch/merge
+  // cycle. fresh.tradingVolume is always just the PENDING_TRADING_VOLUME
+  // stub (see fetchFromBankr) - it is never real data at this point.
+  // Always carry the previous real value forward here, or a background
+  // job's completed result would get silently overwritten by the stub
+  // on the very next normal refresh.
+  if (previous.tradingVolume) {
+    merged.tradingVolume = previous.tradingVolume;
+  }
 
   if (fresh.meta.creatorFeesStatus === "unavailable" && previous.meta.creatorFeesStatus === "ok") {
     console.log("[wrappedService] mergeWithCache: creator-fees degraded this fetch, keeping previous cached creator data");
@@ -461,6 +592,9 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
   const now = Date.now();
   if (cached && now - Date.parse(cached.updatedAt) < STALE_MS) {
     console.log("[wrappedService] serving from cache, no Bankr refetch");
+    if (shouldRefreshTradingVolume(cached.payload.tradingVolume)) {
+      triggerTradingVolumeRefresh(match.evmAddress, cached.payload.tokens);
+    }
     return attachRank(cached);
   }
 
@@ -473,6 +607,11 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
     payload
   );
   console.log("[wrappedService] upsert done");
+
+  if (shouldRefreshTradingVolume(row.payload.tradingVolume)) {
+    triggerTradingVolumeRefresh(match.evmAddress, row.payload.tokens);
+  }
+
   return attachRank(row);
 }
 

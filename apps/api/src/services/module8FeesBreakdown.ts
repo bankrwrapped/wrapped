@@ -1,31 +1,25 @@
-import { fetchIndexedFeeEventsPage, IndexedFeeEventRow, PAGE_SIZE } from "./indexerSync/envioClient";
+import { fetchIndexedFeeEventsPage, fetchWatchedPool, IndexedFeeEventRow, PAGE_SIZE } from "./indexerSync/envioClient";
 import { getHistoricalPriceUsd } from "./pricingService";
 import type { Chain } from "@bankr-wrapped/shared";
 
 // =============================================================================
 // Module 8 — beneficiary fee-event breakdown (Doppler Release + Clanker
-// ClaimTokens/ClaimTokensPermissioned), priced and grouped by SOURCE, with an
-// incomplete-data flag. This is a NEW module, not a replacement for the
-// existing creator-fees/beneficiary-fees earnings already on WrappedPayload.
+// ClaimTokens/ClaimTokensPermissioned), priced and grouped by SOURCE, with a
+// real per-pool incomplete flag. NEW module, additive alongside the existing
+// creator-fees/beneficiary-fees earnings on WrappedPayload — does not
+// replace Bankr's public API calls.
 //
-// OQ8 — RESOLVED: category is `source` ('doppler'/'clanker'), not chain.
-// Stocks (RFQ on Robinhood, Coinbase b20 on Base) exist on both chains and
-// are parked (Module 13, not built) — chain never determines category.
+// OQ8 category split: `source` ('doppler'/'clanker'), not chain — stocks
+// exist on both chains and are out of scope here (Module 13).
 //
-// Confirmed against real files 2026-08-12: field names/types in
-// IndexedFeeEventRow (envioClient.ts / schema.graphql), getHistoricalPriceUsd's
-// signature (pricingService.ts), and Chain (packages/shared) all match what
-// this file assumes. No mismatches found.
-//
-// OPEN — needs your confirmation, not resolved here: schema.graphql's header
-// says item 37 was "FIXED 2026-08-09", citing 254,813/1,378,735 (~18.5%)
-// tokens missing a WatchedPool match — the SAME 254,813 figure originally
-// flagged as "backfill-pending". That strongly suggests ITEM_37_SHIPPED and
-// isTokenBackfillPending below are two flags for one underlying gap, not
-// two separate ones. A changelog comment saying "FIXED" is not the same as
-// confirming production deploy + backfill of existing rows, so ITEM_37_SHIPPED
-// stays `false` here per your last explicit answer — not silently flipped.
-// Confirm current deploy status before shipping.
+// item 37 — REAL STATUS as of 2026-08-15: shipped and backfilled.
+// 1,167,318 of 1,380,122 known tokens now matched; ~42,000 recovered by the
+// fix. The remaining 212,804 is a SEPARATE, already-parked issue (the
+// second-initializer-contract class) — not something this module can or
+// should try to resolve. What this module CAN do, and does below: check,
+// per pool, whether THAT pool's WatchedPool row is still unresolved
+// (tokenIsToken0 === null) and flag only those specific events as
+// incomplete — not a blanket "everything is incomplete" flag anymore.
 // =============================================================================
 
 const CHAINS: Chain[] = ["base", "robinhood"];
@@ -44,20 +38,11 @@ const WETH_ADDRESS: Record<Chain, string> = {
 // decimals, amounts computed here will be wrong by a power-of-10 factor.
 const ASSUMED_DECIMALS = 18;
 
-// ---- FLAGGED — see OPEN note above re: possible overlap with ITEM_37_SHIPPED ----
-async function isTokenBackfillPending(_chain: Chain, _tokenAddress: string): Promise<boolean> {
-  return false; // TODO: wire to real backfill-pending check, or retire this if item 37 supersedes it
-}
-
-// See OPEN note above — left `false` per your last explicit confirmation,
-// NOT flipped based on schema.graphql's "FIXED" changelog comment alone.
-const ITEM_37_SHIPPED = false;
-
 export type FeeSource = "doppler" | "clanker";
 
 export interface SourceEarnings {
   totalEth: number;
-  totalUsd: number; // internal-only by existing convention
+  totalUsd: number; // internal computational bridge only, per playbook's resolved USD/ETH conflict — never surfaced in frontend types
   eventCount: number;
   incomplete: boolean;
 }
@@ -83,16 +68,18 @@ function eventTypeToSource(eventType: IndexedFeeEventRow["eventType"]): FeeSourc
   }
 }
 
-// Clanker path — CONFIRMED (Module 2). Doppler path — still FLAGGED, needs
-// WatchedPool.tokenIsToken0 (confirmed to exist in schema.graphql, just not
-// wired into this function yet).
-function resolveEventAmountRaw(event: IndexedFeeEventRow): bigint {
+// Clanker path — CONFIRMED (Module 2): amountToken0 always, no exceptions.
+// Doppler path — NOW REAL, not a placeholder: resolved via the pool's
+// actual WatchedPool.tokenIsToken0. Caller guarantees this is only invoked
+// once tokenIsToken0 is known non-null — the null/pending case is filtered
+// out before this is called, never guessed here.
+function resolveEventAmountRaw(event: IndexedFeeEventRow, tokenIsToken0: boolean | null): bigint {
   if (event.poolId === null) {
     return BigInt(event.amountToken0 ?? "0");
   }
-  const t0 = BigInt(event.amountToken0 ?? "0");
-  const t1 = BigInt(event.amountToken1 ?? "0");
-  return t0 !== 0n ? t0 : t1;
+  if (tokenIsToken0 === true) return BigInt(event.amountToken0 ?? "0");
+  if (tokenIsToken0 === false) return BigInt(event.amountToken1 ?? "0");
+  throw new Error(`resolveEventAmountRaw: called with unresolved tokenIsToken0 for poolId=${event.poolId}`);
 }
 
 function rawToDecimal(raw: bigint, decimals: number): number {
@@ -100,22 +87,24 @@ function rawToDecimal(raw: bigint, decimals: number): number {
 }
 
 interface PricedEvent {
-  event: IndexedFeeEventRow;
-  source: FeeSource;
   ethAmount: number;
   usdAmount: number;
   failed: boolean;
 }
 
-async function priceOneEvent(chain: Chain, event: IndexedFeeEventRow, source: FeeSource): Promise<PricedEvent> {
-  const rawAmount = resolveEventAmountRaw(event);
+async function priceOneEvent(
+  chain: Chain,
+  event: IndexedFeeEventRow,
+  tokenIsToken0: boolean | null
+): Promise<PricedEvent> {
+  const rawAmount = resolveEventAmountRaw(event, tokenIsToken0);
   const tokenAmount = rawToDecimal(rawAmount, ASSUMED_DECIMALS);
 
   const wethAddr = WETH_ADDRESS[chain];
-  const isAlreadyEth = wethAddr !== "" && event.tokenAddress.toLowerCase() === wethAddr.toLowerCase();
+  const isAlreadyEth = event.tokenAddress.toLowerCase() === wethAddr.toLowerCase();
 
   if (isAlreadyEth) {
-    return { event, source, ethAmount: tokenAmount, usdAmount: 0, failed: false };
+    return { ethAmount: tokenAmount, usdAmount: 0, failed: false };
   }
 
   try {
@@ -126,12 +115,9 @@ async function priceOneEvent(chain: Chain, event: IndexedFeeEventRow, source: Fe
     ]);
     const usdAmount = tokenAmount * tokenPriceUsd;
     const ethAmount = wethPriceUsd > 0 ? usdAmount / wethPriceUsd : 0;
-    return { event, source, ethAmount, usdAmount, failed: false };
+    return { ethAmount, usdAmount, failed: false };
   } catch {
-    // Covers GoldRush failing outright AND toGoldRushChainSlug throwing for
-    // "robinhood" (confirmed in pricingService.ts — only "base" is mapped),
-    // in which case GeckoTerminal fallback is tried before this catch fires.
-    return { event, source, ethAmount: 0, usdAmount: 0, failed: true };
+    return { ethAmount: 0, usdAmount: 0, failed: true };
   }
 }
 
@@ -142,10 +128,15 @@ export async function getBeneficiaryFeesBreakdown(address: string): Promise<Bene
   };
   const incompleteReasons: string[] = [];
 
-  if (!ITEM_37_SHIPPED) {
-    incompleteReasons.push(
-      "item-37-not-shipped: WatchedPool Initialize/Create race fix not confirmed deployed — up to ~18.5% of tokens may have unresolved WatchedPool matches"
-    );
+  const watchedPoolCache = new Map<string, boolean | null>();
+
+  async function getTokenIsToken0(chain: Chain, poolId: string): Promise<boolean | null> {
+    const key = `${chain}:${poolId}`;
+    if (watchedPoolCache.has(key)) return watchedPoolCache.get(key)!;
+    const pool = await fetchWatchedPool(chain, poolId);
+    const resolved = pool?.tokenIsToken0 ?? null;
+    watchedPoolCache.set(key, resolved);
+    return resolved;
   }
 
   for (const chain of CHAINS) {
@@ -158,17 +149,21 @@ export async function getBeneficiaryFeesBreakdown(address: string): Promise<Bene
         const source = eventTypeToSource(event.eventType);
         if (!source) continue;
 
-        const pending = await isTokenBackfillPending(chain, event.tokenAddress);
-        const priced = await priceOneEvent(chain, event, source);
+        let tokenIsToken0: boolean | null = null;
+        if (event.poolId !== null) {
+          tokenIsToken0 = await getTokenIsToken0(chain, event.poolId);
+          if (tokenIsToken0 === null) {
+            bySource[source].incomplete = true;
+            incompleteReasons.push(`pool-unresolved: ${chain}:${event.poolId}`);
+            continue;
+          }
+        }
 
-        if (priced.failed || pending) {
+        const priced = await priceOneEvent(chain, event, tokenIsToken0);
+
+        if (priced.failed) {
           bySource[source].incomplete = true;
-          if (priced.failed) {
-            incompleteReasons.push(`pricing-failed: ${chain}:${event.txHash}:${event.logIndex}`);
-          }
-          if (pending) {
-            incompleteReasons.push(`backfill-pending: ${chain}:${event.tokenAddress}`);
-          }
+          incompleteReasons.push(`pricing-failed: ${chain}:${event.txHash}:${event.logIndex}`);
           continue;
         }
 
@@ -185,7 +180,7 @@ export async function getBeneficiaryFeesBreakdown(address: string): Promise<Bene
 
   const totalEth = bySource.doppler.totalEth + bySource.clanker.totalEth;
   const totalUsd = bySource.doppler.totalUsd + bySource.clanker.totalUsd;
-  const incomplete = !ITEM_37_SHIPPED || bySource.doppler.incomplete || bySource.clanker.incomplete;
+  const incomplete = bySource.doppler.incomplete || bySource.clanker.incomplete;
 
   return {
     address,

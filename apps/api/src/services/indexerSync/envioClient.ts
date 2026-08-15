@@ -174,3 +174,41 @@ export async function fetchIndexedFeeEventsPage(
   });
   return data[rootField];
 }
+// =============================================================================
+// NEW — WatchedPool lookup, added for Module 8's real backfill-completeness
+// check (item 37). Same envioQuery/table-map/error-message pattern as the
+// functions above. Table names confirmed live per playbook §6.5:
+// base_WatchedPool / robinhood_WatchedPool.
+// =============================================================================
+
+export interface WatchedPoolRow {
+  id: string;
+  chain: string;
+  poolId: string;
+  currency0: string;
+  currency1: string;
+  tokenAddress: string | null;
+  tokenIsToken0: boolean | null; // null = not yet resolved (orphaned/pending)
+}
+
+const WATCHED_POOL_TABLE: Record<string, string> = {
+  base: "base_WatchedPool",
+  robinhood: "robinhood_WatchedPool",
+};
+
+export async function fetchWatchedPool(chain: string, poolId: string): Promise<WatchedPoolRow | null> {
+  const rootField = WATCHED_POOL_TABLE[chain];
+  if (!rootField) {
+    throw new Error(`fetchWatchedPool: no known table for chain=${chain}`);
+  }
+
+  const query = `
+    query WatchedPoolLookup($poolId: String!) {
+      ${rootField}(where: { poolId: { _eq: $poolId } }) {
+        id chain poolId currency0 currency1 tokenAddress tokenIsToken0
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, WatchedPoolRow[]>>(query, { poolId });
+  return data[rootField][0] ?? null;
+}
