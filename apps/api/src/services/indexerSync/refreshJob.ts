@@ -4,7 +4,6 @@ import { getHistoricalPriceUsd } from "../pricingService";
 import { indexedTokensRepository } from "../../repositories/indexedTokensRepository";
 import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSummaryRepository";
 
-const BASE_CHAIN_ID = 8453;
 
 export async function runScheduledRefresh(chain: string): Promise<void> {
   if (chain !== "base") {
@@ -72,8 +71,7 @@ export async function runScheduledRefresh(chain: string): Promise<void> {
       console.error(`[indexerSync refresh] failed for ${chain}:${tokenAddress}:`, err);
     }
   }
-
-  const chainFullySynced = await isChainFullySynced(BASE_CHAIN_ID);
+const chainFullySynced = await isChainFullySynced(chain);
   if (!chainFullySynced) {
     console.warn(`[indexerSync refresh] Envio not fully synced for chain=${chain} — some tokens may still be 'in_progress'`);
   }

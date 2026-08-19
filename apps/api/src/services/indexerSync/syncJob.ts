@@ -6,7 +6,6 @@ import { checkAndNotifyWalletsForToken } from "./wrappedNotify";
 import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSummaryRepository";
 import type { IndexedSwapRow } from "./envioClient";
 
-const BASE_CHAIN_ID = 8453;
 
 // Groups swaps within a page by hour bucket -- tokenAddress is invariant
 // within a single backfillToken() call (one token per call), so a
@@ -99,6 +98,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
     let excludedBucketCount = 0;
     let highestBlockSeen = 0n;
 
+    
     for (;;) {
       const page = await fetchIndexedSwapsPage(chain, tokenAddress, cursor);
       if (page.length === 0) break;
@@ -151,7 +151,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
       );
     }
 
-    const chainFullySynced = await isChainFullySynced(BASE_CHAIN_ID);
+    const chainFullySynced = await isChainFullySynced(chain);
     await indexedTokensRepository.setStatus(
       chain,
       tokenAddress,

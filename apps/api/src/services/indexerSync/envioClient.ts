@@ -5,8 +5,28 @@ interface GraphQLResponse<T> {
   errors?: { message: string }[];
 }
 
-async function envioQuery<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch(env.ENVIO_GRAPHQL_URL, {
+// Each chain runs its own isolated Envio instance (own Postgres, own
+// indexed events) - there is no shared multi-chain table. `chain` here
+// selects which deployment's endpoint to hit, not a filter within a
+// shared table (the `where: { chain: ... }` clauses below are now
+// redundant within a single chain's own data, but harmless - kept for
+// defense/clarity, not relied on for chain isolation).
+const ENDPOINT_MAP: Record<string, string> = {
+  base: env.ENVIO_GRAPHQL_URL_BASE,
+  robinhood: env.ENVIO_GRAPHQL_URL_ROBINHOOD,
+};
+
+const CHAIN_ID_MAP: Record<string, number> = {
+  base: 8453,
+  robinhood: 4663,
+};
+
+async function envioQuery<T>(chain: string, query: string, variables: Record<string, unknown>): Promise<T> {
+  const url = ENDPOINT_MAP[chain];
+  if (!url) {
+    throw new Error(`envioQuery: no Envio endpoint configured for chain=${chain}`);
+  }
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables }),
@@ -73,7 +93,7 @@ export async function fetchIndexedSwapsPage(
       }
     }
   `;
-  const data = await envioQuery<Record<string, IndexedSwapRow[]>>(query, {
+  const data = await envioQuery<Record<string, IndexedSwapRow[]>>(chain, query, {
     chain,
     token: tokenAddress,
     fromBlock: fromBlockExclusive,
@@ -107,7 +127,11 @@ export async function fetchIndexedSwapsPage(
 // still catching up, before trusting this in anything that gates on it.
 const CHAIN_METADATA_ROOT_FIELD = "chain_metadata";
 
-export async function isChainFullySynced(chainId: number): Promise<boolean> {
+export async function isChainFullySynced(chain: string): Promise<boolean> {
+  const chainId = CHAIN_ID_MAP[chain];
+  if (chainId === undefined) {
+    throw new Error(`isChainFullySynced: unsupported chain=${chain}`);
+  }
   const query = `
     query ChainMeta($chainId: Int!) {
       ${CHAIN_METADATA_ROOT_FIELD}(where: { chain_id: { _eq: $chainId } }) {
@@ -116,6 +140,7 @@ export async function isChainFullySynced(chainId: number): Promise<boolean> {
     }
   `;
   const data = await envioQuery<Record<string, { timestamp_caught_up_to_head_or_endblock: string | null }[]>>(
+    chain,
     query,
     { chainId },
   );
@@ -175,7 +200,7 @@ export async function fetchIndexedFeeEventsPage(
       }
     }
   `;
-  const data = await envioQuery<Record<string, IndexedFeeEventRow[]>>(query, {
+  const data = await envioQuery<Record<string, IndexedFeeEventRow[]>>(chain, query, {
     chain,
     recipient,
     fromBlock: fromBlockExclusive,
@@ -216,6 +241,6 @@ export async function fetchWatchedPool(chain: string, poolId: string): Promise<W
       }
     }
   `;
-  const data = await envioQuery<Record<string, WatchedPoolRow[]>>(query, { chain, poolId });
+  const data = await envioQuery<Record<string, WatchedPoolRow[]>>(chain, query, { chain, poolId });
   return data[rootField][0] ?? null;
 }
