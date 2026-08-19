@@ -21,9 +21,11 @@ export const env = {
   // endpoint (rate-limited, fine for our low call volume); override via
   // env if a dedicated provider is set up later.
   ROBINHOOD_RPC_URL: process.env.ROBINHOOD_RPC_URL || "https://rpc.mainnet.chain.robinhood.com",
-  // Envio's GraphQL endpoint - read path for envioClient.ts's indexed
-  // Swap/Release/Collect event queries.
-  ENVIO_GRAPHQL_URL: required("ENVIO_GRAPHQL_URL"),
+  // Envio's GraphQL endpoints - each chain runs its own isolated Envio
+  // instance (own DB, own indexed events), so each needs its own endpoint.
+  // A single shared URL cannot serve both chains — see envioClient.ts.
+  ENVIO_GRAPHQL_URL_BASE: required("ENVIO_GRAPHQL_URL_BASE"),
+  ENVIO_GRAPHQL_URL_ROBINHOOD: required("ENVIO_GRAPHQL_URL_ROBINHOOD"),
   // Module 14: X OAuth 2.0 (Web App / confidential client, registered in
   // X's Developer Console). Client Secret is what makes it confidential -
   // required for the token exchange, unlike a public/SPA client.
