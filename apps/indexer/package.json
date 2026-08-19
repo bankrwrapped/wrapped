@@ -1,0 +1,18 @@
+{
+  "name": "@bankr-wrapped/indexer",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "codegen": "envio codegen",
+    "dev": "envio dev",
+    "start": "envio start"
+  },
+  "dependencies": {
+    "envio": "^3.6.0"
+  },
+  "devDependencies": {
+    "@envio-dev/hypersync-client": "^1.4.0",
+    "tsx": "^4.23.12"
+  }
+}

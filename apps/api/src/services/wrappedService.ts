@@ -9,10 +9,221 @@ import type {
 } from "@bankr-wrapped/shared";
 import { wrappedCacheRepository, type PersistedWrappedRow } from "../repositories/wrappedCacheRepository";
 import { bankrRateLimiter } from "../utils/bankrRateLimiter";
+import type { WrappedTradingVolume } from "@bankr-wrapped/shared";
+import { getBestAvailableVolume } from "./tradingVolumeEngine/getBestAvailableVolume";
+import type { TokenRef, ChainId, TokenSource } from "./tradingVolumeEngine/types";
+import { getBeneficiaryFeesBreakdown } from "./module8FeesBreakdown";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
 const FETCH_TIMEOUT_MS = 25000; // WSL2 Bun cold-start cost, fine for Railway too
+
+const VOLUME_RECHECK_MS = 15 * 60 * 1000; // 15 minutes
+
+const PENDING_TRADING_VOLUME: WrappedTradingVolume = {
+  totalVolumeUsd: 0,
+  status: "pending",
+  isComplete: false,
+  tokensTotal: 0,
+  tokensComplete: 0,
+  tokensInProgress: 0,
+  tokensPending: 0,
+  tokensFailed: 0,
+  updatedAt: new Date(0).toISOString(),
+};
+
+const volumeComputationsInFlight = new Set<string>();
+const wrappedRequestsInFlight = new Map<string, Promise<WrappedCacheRow | null>>();
+
+function normalizeSource(raw: string): TokenSource {
+  if (raw === "doppler" || raw === "clanker") return raw;
+  console.warn(
+    "[wrappedService] normalizeSource: unrecognized token source \"" + raw + "\" -- treating as unknown"
+  );
+  return "unknown";
+}
+
+function buildVolumeTokenRefs(wallet: string, tokens: WrappedTokenEntry[]): TokenRef[] {
+  const refs: TokenRef[] = [];
+  for (const t of tokens) {
+    if (t.chain !== "base" && t.chain !== "robinhood") continue;
+    refs.push({
+      address: t.tokenAddress,
+      chain: t.chain as ChainId,
+      symbol: t.symbol,
+      name: t.name,
+      walletAddress: wallet,
+      source: normalizeSource(t.source),
+    });
+  }
+  return refs;
+}
+
+function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]): void {
+  if (volumeComputationsInFlight.has(wallet)) {
+    console.log("[wrappedService] triggerTradingVolumeRefresh: already in flight for " + wallet + ", skipping");
+    return;
+  }
+  const refs = buildVolumeTokenRefs(wallet, tokens);
+  if (refs.length === 0) {
+    console.log("[wrappedService] triggerTradingVolumeRefresh: no base/robinhood tokens for " + wallet + ", skipping");
+    return;
+  }
+
+  volumeComputationsInFlight.add(wallet);
+  console.log("[wrappedService] triggerTradingVolumeRefresh: starting background compute for " + wallet + ", " + refs.length + " token(s)");
+
+  getBestAvailableVolume(wallet, refs)
+    .then(async (result) => {
+      const tradingVolume: WrappedTradingVolume = {
+        totalVolumeUsd: result.summary.totalVolumeUsd,
+        status: "ok",
+        isComplete: result.isComplete,
+        tokensTotal: result.tokensTotal,
+        tokensComplete: result.tokensComplete,
+        tokensInProgress: result.tokensInProgress,
+        tokensPending: result.tokensPending,
+        tokensFailed: result.tokensFailed,
+        updatedAt: new Date().toISOString(),
+      };
+      await wrappedCacheRepository.updateTradingVolume(wallet, tradingVolume);
+      console.log(
+        "[wrappedService] triggerTradingVolumeRefresh: done for " + wallet +
+        ", total=$" + tradingVolume.totalVolumeUsd + ", isComplete=" + tradingVolume.isComplete
+      );
+    })
+    .catch((err) => {
+      console.error("[wrappedService] triggerTradingVolumeRefresh: failed for " + wallet, err);
+    })
+    .finally(() => {
+      volumeComputationsInFlight.delete(wallet);
+    });
+}
+
+function shouldRefreshTradingVolume(
+  tv: WrappedTradingVolume | undefined,
+): boolean {
+  console.log(
+    "[TV DEBUG] shouldRefreshTradingVolume:",
+    JSON.stringify({
+      tv,
+      hasTv: Boolean(tv),
+      status: tv?.status,
+      isComplete: tv?.isComplete,
+      updatedAt: tv?.updatedAt,
+    }),
+  );
+
+  // No volume result yet: compute it.
+  if (!tv || tv.status === "pending") {
+    console.log("[TV DEBUG] RESULT=true because missing/pending");
+    return true;
+  }
+
+  // Complete numbers are authoritative until something explicitly
+  // invalidates them. Do not repeatedly recompute them.
+  if (tv.isComplete) {
+    console.log("[TV DEBUG] RESULT=false because complete");
+    return false;
+  }
+
+  // IMPORTANT:
+  // An incomplete result must be re-checked on the next user request.
+  // The previous 15-minute gate allowed a cold-start result to remain
+  // stale even after its backfill had already completed.
+  console.log(
+    "[TV DEBUG] RESULT=true because volume is incomplete; rechecking",
+  );
+
+  return true;
+}
+
+// NEW — Module 8's real on-chain fee-event breakdown (indexed_fee_events,
+// via getBeneficiaryFeesBreakdown). Additive alongside Bankr's own
+// creator-fees/beneficiary-fees calls, not a replacement. OQ8's locked
+// decision (2026-08-15): expose only the combined doppler+clanker ETH
+// total as a single number, nothing per-source.
+//
+// Originally shipped with no status companion field (OQ8 was locked as a
+// bare number) - that gap is now fixed for real: WrappedPayload carries
+// meta.earningsFromIndexerStatus, same "ok"/"unavailable" pattern as
+// creatorFeesStatus/beneficiaryFeesStatus, and mergeWithCache below uses
+// it the same way (see the block near the other two).
+//
+// FIXED 2026-08-18 (session 2, prod-down bug): getBeneficiaryFeesBreakdown
+// was awaited with NO timeout, unlike every sibling fetch* function in this
+// file (all of which use AbortSignal.timeout(FETCH_TIMEOUT_MS)). It pages
+// indexer events and does per-event USD pricing calls through a pipeline
+// with known slow/edge-case behavior (see pricingService's 179-day
+// GeckoTerminal fallback window). A hang anywhere in that chain hung this
+// entire function forever, which hung Promise.all in fetchFromBankr, which
+// hung the whole /api/wrapped/:handle endpoint with zero error and zero
+// further logs - reproduced live against basedkabeer, confirmed via
+// instrumented logs showing fetchEarningsFromIndexer: start with no
+// matching done/failed line, while the other 3 Promise.all branches
+// completed normally. Promise.race against a timer bounds this the same
+// way AbortSignal bounds a fetch() - getBeneficiaryFeesBreakdown itself
+// isn't cancelled (no signal threaded through its internal pipeline), it
+// just stops being awaited, which is sufficient to unblock the response.
+// Root cause of WHY it was slow/hanging for this wallet is still open -
+// this fix addresses the symptom (endpoint returns nothing), not
+// necessarily the underlying slowness inside module8FeesBreakdown.ts.
+async function fetchEarningsFromIndexer(
+  address: string
+): Promise<{ data: number; status: "ok" | "unavailable" }> {
+  console.log("[wrappedService] fetchEarningsFromIndexer: start");
+
+  // FIXED 2026-08-18 (session 2, second crash bug): getBeneficiaryFeesBreakdown
+  // is wrapped in Promise.race against a timeout below. Promise.race only
+  // forwards whichever promise settles FIRST - the loser keeps running in
+  // the background but is otherwise orphaned. If the loser later REJECTS
+  // (a real network error, not just slowness - e.g. observed live:
+  // "Unable to connect. Is the computer able to access the url?") with no
+  // handler attached to that specific promise, it becomes an unhandled
+  // promise rejection. Bun (like Node 15+) CRASHES THE WHOLE PROCESS on an
+  // unhandled rejection by default - mid-request, before any response can
+  // be written out. This is what was producing curl: (52) Empty reply from
+  // server: not a hang, not idleTimeout, not Postgres - the server process
+  // itself was dying intermittently, whenever the abandoned background
+  // call happened to reject after the race had already settled some other
+  // way. Explains why this was non-deterministic across identical-looking
+  // requests. Fix: attach .catch() directly to breakdownPromise immediately,
+  // independent of the race, so it can never be unhandled regardless of
+  // which promise wins.
+  const breakdownPromise = getBeneficiaryFeesBreakdown(address).catch((err) => {
+    console.error(
+      "[wrappedService] fetchEarningsFromIndexer: background breakdown rejected (may be after race already settled), err=" + String(err)
+    );
+    throw err;
+  });
+
+  try {
+    const breakdown = await Promise.race([
+      breakdownPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`fetchEarningsFromIndexer: timed out after ${FETCH_TIMEOUT_MS}ms`)),
+          FETCH_TIMEOUT_MS
+        )
+      ),
+    ]);
+    console.log(
+      "[wrappedService] fetchEarningsFromIndexer: done, totalEth=" + breakdown.totalEth +
+      ", incomplete=" + breakdown.incomplete +
+      (breakdown.incomplete ? ", reasons=" + breakdown.incompleteReasons.length : "")
+    );
+    // breakdown.incomplete (some pools still orphaned, or some events
+    // failed pricing) is intentionally NOT treated as "unavailable" here
+    // - that's a partial/best-effort real number, same category as
+    // Bankr's own API returning a real but partial result. "unavailable"
+    // is reserved for the whole fetch throwing outright (Envio/Postgres
+    // down, timeout, etc), same meaning as fetchCreatorFees/fetchBeneficiaryFees.
+    return { data: breakdown.totalEth, status: "ok" };
+  } catch (err) {
+    console.log("[wrappedService] fetchEarningsFromIndexer: failed, err=" + String(err));
+    return { data: 0, status: "unavailable" };
+  }
+}
 
 function pickBestMatch(
   query: string,
@@ -26,11 +237,6 @@ function pickBestMatch(
   const twitterExact = exact.find((r) => r.platform === "twitter");
   if (twitterExact) return twitterExact;
   if (exact.length === 1) return exact[0];
-  // Multiple non-Twitter accounts share this exact handle (seen in practice -
-  // two separate jessepollak0 Farcaster entries with different wallets) and
-  // Bankr's API gives us no field to tell which is "correct". Sort
-  // deterministically ourselves so a repeat search always lands on the same
-  // wallet, even though we still can't know which duplicate is "real".
   console.warn(
     "[wrappedService] pickBestMatch: " + exact.length +
     " duplicate exact-match accounts for '" + query +
@@ -119,8 +325,6 @@ async function fetchBeneficiaryFees(
   }
 }
 
-// ETH/USD price - only needed now for the INTERNAL usd figures (archetype
-// thresholds, leaderboard ranking). Display is pure ETH, no conversion.
 let lastKnownEthUsdPrice: number | null = null;
 
 async function fetchFromDefiLlama(): Promise<number> {
@@ -203,10 +407,6 @@ function wethAmount(
   return 0;
 }
 
-// Bankr's Clanker-sourced token entries have been observed reporting the
-// EXACT SAME claimable+claimed amounts across multiple genuinely different
-// tokens for the same wallet. Doppler tokens use a clean per-pool read and
-// have never shown this pattern - scoped to source === "clanker" only.
 type ClankerDedupeEntry = {
   source: string;
   claimable: { token0: string; token1: string };
@@ -229,12 +429,14 @@ function dedupeClankerAmounts(tokens: ClankerDedupeEntry[]): boolean[] {
 
 async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayload> {
   console.log("[wrappedService] fetchFromBankr: start, wallet=" + match.evmAddress);
-  const [creatorResult, beneficiaryResult, ethUsd] = await Promise.all([
+  const [creatorResult, beneficiaryResult, ethUsd, earningsFromIndexerResult] = await Promise.all([
     fetchCreatorFees(match.evmAddress),
     fetchBeneficiaryFees(match.evmAddress),
     fetchEthUsdPrice(),
+    fetchEarningsFromIndexer(match.evmAddress),
   ]);
-  console.log("[wrappedService] fetchFromBankr: all three resolved");
+  console.log("[wrappedService] fetchFromBankr: all four resolved");
+  const earningsFromIndexer = earningsFromIndexerResult.data;
   const creator = creatorResult.data;
   const beneficiary = beneficiaryResult.data;
 
@@ -243,7 +445,6 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const creatorKeep = dedupeClankerAmounts(creator.tokens);
   const pleaseBroKeep = dedupeClankerAmounts(beneficiary.tokens);
 
-  // Tokens now carry raw ETH only - no per-token USD conversion needed.
   const launchedTokens: WrappedTokenEntry[] = creator.tokens.map((t, i) => {
     const feeWeth = creatorKeep[i] ? wethAmount(t, "claimable") + wethAmount(t, "claimed") : 0;
     return {
@@ -252,6 +453,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       symbol: t.symbol,
       chain: t.chain,
       feesEarnedEth: feeWeth,
+      source: t.source,
     };
   });
 
@@ -263,6 +465,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       symbol: t.symbol,
       chain: t.chain,
       feesEarnedEth: feeWeth,
+      source: t.source,
     };
   });
 
@@ -284,23 +487,16 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     0
   );
 
-  // ETH totals - what's actually displayed.
   const creatorEarningsEth = creatorClaimedWeth + creatorClaimableWeth;
   const pleaseBroEarningsEth = pleaseBroClaimedWeth + pleaseBroClaimableWeth;
   const totalEth = creatorEarningsEth + pleaseBroEarningsEth;
   const unclaimedEth = creatorClaimableWeth + pleaseBroClaimableWeth;
 
-  // USD totals - internal only, priced at today's rate (locked-in decision
-  // after a session of confusing multi-day-pricing swings). Used solely for
-  // archetype thresholds and leaderboard ranking, never displayed directly.
   const creatorEarnings = toUsd(creatorEarningsEth);
   const pleaseBroEarnings = toUsd(pleaseBroEarningsEth);
   const total = creatorEarnings + pleaseBroEarnings;
   const unclaimed = toUsd(unclaimedEth);
 
-  // dailyEarnings/bestDay - now raw ETH, no price conversion at all. This
-  // removes the entire historical-pricing fetch that previously ran here -
-  // a genuine simplification, not just a display change.
   const dailyEarnings = creator.dailyEarnings.map((d) => ({
     date: d.date,
     eth: parseAmount(d.weth),
@@ -380,26 +576,21 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     meta: {
       creatorFeesStatus: creatorResult.status,
       beneficiaryFeesStatus: beneficiaryResult.status,
+      earningsFromIndexerStatus: earningsFromIndexerResult.status,
     },
+    tradingVolume: PENDING_TRADING_VOLUME,
+    earningsFromIndexer,
   };
 }
 
 async function attachRank(row: PersistedWrappedRow): Promise<WrappedCacheRow> {
+  console.log("[wrappedService] attachRank: start, wallet=" + row.walletAddress);
   const { rank, totalUsers } = await wrappedCacheRepository.getRank(row.walletAddress);
+  console.log("[wrappedService] attachRank: getRank done, rank=" + rank + " totalUsers=" + totalUsers);
   const percentile = totalUsers > 0 ? Math.ceil((rank / totalUsers) * 100) : 100;
   return { ...row, rank, totalUsers, percentile };
 }
 
-// If a refresh partially fails (e.g. Bankr's creator-fees 500ing), the
-// fresh payload comes back with that side genuinely zeroed out - correct
-// for what THIS fetch got, but blindly overwriting the cache with it means
-// a transient upstream failure permanently stomps last-known-good numbers
-// for anyone else who searches this wallet in the following minutes.
-// Confirmed happening in production (basedkabeer, 2026-08-02 22:29 UTC:
-// creator-fees 500'd, card showed 0 ETH / 0 tokens launched, and that zero
-// got written into our own DB). Fix: on a degraded side, keep the
-// PREVIOUS cached payload's values for that side instead of the fresh
-// zeroed ones, while still taking whatever DID fetch successfully.
 function mergeWithCache(
   fresh: WrappedPayload,
   previous: WrappedPayload | null
@@ -407,6 +598,10 @@ function mergeWithCache(
   if (!previous) return fresh;
 
   const merged: WrappedPayload = { ...fresh };
+
+  if (previous.tradingVolume) {
+    merged.tradingVolume = previous.tradingVolume;
+  }
 
   if (fresh.meta.creatorFeesStatus === "unavailable" && previous.meta.creatorFeesStatus === "ok") {
     console.log("[wrappedService] mergeWithCache: creator-fees degraded this fetch, keeping previous cached creator data");
@@ -438,9 +633,6 @@ function mergeWithCache(
     merged.meta = { ...merged.meta, beneficiaryFeesStatus: "ok" };
   }
 
-  // Unclaimed/claimCount are wallet-level aggregates spanning both sides -
-  // if EITHER side degraded, these can't be trusted fresh either, so fall
-  // back to the previous cached values in that case too.
   const eitherDegraded =
     fresh.meta.creatorFeesStatus === "unavailable" || fresh.meta.beneficiaryFeesStatus === "unavailable";
   if (eitherDegraded && (previous.meta.creatorFeesStatus === "ok" && previous.meta.beneficiaryFeesStatus === "ok")) {
@@ -448,10 +640,34 @@ function mergeWithCache(
     merged.claimCount = previous.claimCount;
   }
 
+  // Module 8 - same real degraded-carry-forward pattern as
+  // creator/beneficiary above, now that earningsFromIndexerStatus exists.
+  // No more guessing from a zero value; this is an exact status check.
+  if (fresh.meta.earningsFromIndexerStatus === "unavailable" && previous.meta.earningsFromIndexerStatus === "ok") {
+    console.log("[wrappedService] mergeWithCache: earnings-from-indexer degraded this fetch, keeping previous cached value");
+    merged.earningsFromIndexer = previous.earningsFromIndexer;
+    merged.meta = { ...merged.meta, earningsFromIndexerStatus: "ok" };
+  }
+
   return merged;
 }
 
 async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
+  const key = handle.toLowerCase();
+  const existing = wrappedRequestsInFlight.get(key);
+  if (existing) {
+    console.log("[wrappedService] getWrapped: request already in flight for " + key + ", joining it");
+    return existing;
+  }
+
+  const promise = getWrappedInner(handle).finally(() => {
+    wrappedRequestsInFlight.delete(key);
+  });
+  wrappedRequestsInFlight.set(key, promise);
+  return promise;
+}
+
+async function getWrappedInner(handle: string): Promise<WrappedCacheRow | null> {
   const match = await resolveWallet(handle);
   if (!match) return null;
 
@@ -461,6 +677,18 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
   const now = Date.now();
   if (cached && now - Date.parse(cached.updatedAt) < STALE_MS) {
     console.log("[wrappedService] serving from cache, no Bankr refetch");
+    if (shouldRefreshTradingVolume(cached.payload.tradingVolume)) {
+      triggerTradingVolumeRefresh(match.evmAddress, cached.payload.tokens);
+    } else {
+      const tv = cached.payload.tradingVolume;
+      console.log(
+        "[wrappedService] trading volume refresh skipped (cache-hit path): status=" + tv?.status +
+        " isComplete=" + tv?.isComplete +
+        " updatedAt=" + tv?.updatedAt +
+        " ageMs=" + (tv?.updatedAt ? Date.now() - Date.parse(tv.updatedAt) : "n/a") +
+        " thresholdMs=" + VOLUME_RECHECK_MS
+      );
+    }
     return attachRank(cached);
   }
 
@@ -473,6 +701,20 @@ async function getWrapped(handle: string): Promise<WrappedCacheRow | null> {
     payload
   );
   console.log("[wrappedService] upsert done");
+
+  if (shouldRefreshTradingVolume(row.payload.tradingVolume)) {
+    triggerTradingVolumeRefresh(match.evmAddress, row.payload.tokens);
+  } else {
+    const tv = row.payload.tradingVolume;
+    console.log(
+      "[wrappedService] trading volume refresh skipped (fresh-fetch path): status=" + tv?.status +
+      " isComplete=" + tv?.isComplete +
+      " updatedAt=" + tv?.updatedAt +
+      " ageMs=" + (tv?.updatedAt ? Date.now() - Date.parse(tv.updatedAt) : "n/a") +
+      " thresholdMs=" + VOLUME_RECHECK_MS
+    );
+  }
+
   return attachRank(row);
 }
 

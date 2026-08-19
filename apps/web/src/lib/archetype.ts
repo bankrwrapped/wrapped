@@ -2,12 +2,17 @@ import type { WrappedProfile } from "@/lib/wrapped-data";
 
 export type Archetype = {
   title: string;
+  // Written in Bankr's own voice, reporting back on what it watched the
+  // user do — not marketing copy describing them from the outside.
+  // Field-report tone: dry, specific, occasionally impressed. The number
+  // does the work; the sentence just delivers it.
   description: string;
 };
 
 /**
- * Thresholds below are first-pass estimates, not measured against real
- * distribution data yet. Expect to tune these once run against real wallets.
+ * Thresholds below are unchanged from the original first-pass estimates —
+ * not measured against real distribution data yet. Expect to tune these
+ * once run against real wallets. Only the copy voice changed here.
  */
 export function getArchetype(p: WrappedProfile): Archetype {
   // p.creatorEarnings/p.pleaseBroEarnings now include BOTH claimed and
@@ -21,7 +26,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (totalEarned >= 5000) {
     return {
       title: "The Whale",
-      description: "Serious earnings on Bankr, you're not playing small.",
+      description: "Ran the numbers twice. They didn't change. You're one of ours now.",
     };
   }
 
@@ -29,7 +34,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (p.tokensLaunched >= 10) {
     return {
       title: "Serial Launcher",
-      description: `${p.tokensLaunched} tokens deployed. You don't stop building.`,
+      description: `${p.tokensLaunched} tokens. I stopped counting around the fourth and just started watching.`,
     };
   }
 
@@ -38,7 +43,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (p.unclaimed >= 50 && p.unclaimed > claimedOnly * 2) {
     return {
       title: "The Sleeper",
-      description: "Real money sitting unclaimed. Time to go get it.",
+      description: "You've got money sitting in a wallet doing nothing. I checked twice. Still there.",
     };
   }
 
@@ -49,7 +54,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (isFarmer) {
     return {
       title: "The Please Bro Farmer",
-      description: `${p.pleaseBro.length} Please Bro tokens redirecting fees your way.`,
+      description: `${p.pleaseBro.length} people cut you in on their fees. I don't know what you did to deserve that. Neither do you, probably.`,
     };
   }
 
@@ -58,7 +63,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (totalEarned >= 50 && totalEarned > 0 && p.unclaimed / totalEarned < 0.25) {
     return {
       title: "The Claimer",
-      description: "You earn it, you claim it. No fees left behind.",
+      description: "You earn it, you take it. Nothing left sitting on the table for me to find.",
     };
   }
 
@@ -70,13 +75,13 @@ export function getArchetype(p: WrappedProfile): Archetype {
   if (p.tokensLaunched === 1 && totalEarned >= 100) {
     return {
       title: "One and Done",
-      description: "One launch, real earnings. Quality over quantity.",
+      description: "One launch. Real earnings. Most people need ten shots to hit what you hit with one.",
     };
   }
 
   // Fallback
   return {
     title: "Just Getting Started",
-    description: "Your Bankr story is just beginning.",
+    description: "First entry in the log. Everyone's file starts here.",
   };
 }

@@ -7,6 +7,12 @@ export type TokenEntry = {
   chain: Chain;
   // Raw ETH earned on this token - no USD conversion, displayed as-is.
   feesEarnedEth: number;
+  // Raw source string from Bankr's API ("doppler" | "clanker", loosely
+  // typed to match the backend contract). Not currently rendered anywhere
+  // in the UI - added to keep this type in sync with WrappedTokenEntry per
+  // this file's own "must match" contract, available if a future UI need
+  // wants to show it (e.g. a Doppler/Clanker badge).
+  source: string;
 };
 
 export type FeesFetchStatus = "ok" | "unavailable";

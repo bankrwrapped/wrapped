@@ -1,0 +1,64 @@
+# Module 2 entity schema — Envio's own database.
+#
+# RESOLVED 2026-08-07 (playbook update): Envio and apps/api are two SEPARATE
+# Postgres instances. Envio owns this schema; apps/api owns only
+# indexed_contracts/indexed_tokens/token_volume_summary/price_cache in its
+# own DB (Module 6). Data flows one direction only: Envio -> apps/api via
+# Module 9's sync job.
+#
+# RESOLVED 2026-08-08 (real design change, not a bug fix): pool matching is
+# back to currency-address matching (KnownAsset), not hook-address matching
+# (the old KnownHook). Confirmed via a real on-chain Create tx: `poolOrHook`
+# is NOT reliably a genuine V4 hook address — it depends on which Doppler
+# pool-initializer variant ran for a given launch, and at least one real
+# launch returned the asset's own address in that slot instead of a hook.
+# Under the old hooks-matching design this wasn't just messy metadata: that
+# pool's `Initialize.hooks` would never match any KnownHook row, so
+# WatchedPool never got created, and every subsequent Swap/Collect/Release
+# for it was silently dropped. `hookAddress` is kept on KnownAsset as an
+# audit field only (e.g. to count how many indexed launches used a
+# non-hook initializer) — not used for matching anymore.
+
+type KnownAsset {
+  id: ID! # `${chain}:${tokenAddress}`
+  chain: String!
+  tokenAddress: String!
+  hookAddress: String! # poolOrHook from Airlock.Create — audit-only, see note above; NOT reliably a real hook address
+  source: String! # 'doppler' (Clanker confirmed Base-only, not on Robinhood — §2 OQ3 — so this field only ever needs to distinguish doppler here, not clanker, on this chain)
+}
+
+type WatchedPool {
+  id: ID! # `${chain}:${poolId}`
+  chain: String!
+  poolId: String!
+  tokenAddress: String!
+  tokenIsToken0: Boolean! # known at creation time from Initialize's currency0/currency1 — no RPC call needed
+}
+
+type IndexedSwap {
+  id: ID! # `${chain}:${txHash}:${logIndex}`
+  chain: String!
+  poolId: String!
+  tokenAddress: String!
+  blockNumber: BigInt!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Timestamp!
+  amountToken: BigInt! # abs(amount0 or amount1), whichever side is the launched token, per tokenIsToken0
+  amountUsd: BigDecimal # left NULL — pricing is Module 5's job, done downstream via Envio's GraphQL API
+}
+
+type IndexedFeeEvent {
+  id: ID! # `${chain}:${txHash}:${logIndex}`
+  chain: String!
+  poolId: String!
+  tokenAddress: String!
+  eventType: String! # 'Collect' | 'Release' | 'Lock' | 'Unlock' | 'UpdateBeneficiary'
+  recipient: String # beneficiary (Release), recipient (Unlock), newBeneficiary (UpdateBeneficiary); null for Collect/Lock
+  amountToken0: BigInt
+  amountToken1: BigInt
+  blockNumber: BigInt!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Timestamp!
+}

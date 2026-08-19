@@ -75,6 +75,7 @@ create table if not exists indexed_tokens (
   source                     text not null check (source in ('doppler', 'clanker')),
   deployer_wallet            text,
   first_seen_block           bigint,
+  decimals                   integer,
   backfill_status            text not null default 'pending'
                                check (backfill_status in ('pending', 'in_progress', 'complete', 'failed')),
   backfill_checkpoint_block  bigint,
@@ -107,3 +108,40 @@ create table if not exists price_cache (
   created_at        timestamptz not null default now(),
   primary key (chain, token_address, timestamp_bucket)
 );
+
+-- Added by Module 7 (2026-08-08), filling a gap: walletBackfillRequestsRepository.ts
+-- (Module 9, item 19) queries this table but it was never actually added to
+-- schema.sql -- confirmed missing via direct grep, not assumed. Shape matches
+-- the repository's real query exactly (wallet_address, chain, token_address,
+-- unique constraint the repository's ON CONFLICT already assumes).
+create table if not exists wallet_backfill_requests (
+  wallet_address  text not null,
+  chain           text not null check (chain in ('base', 'robinhood')),
+  token_address   text not null,
+  requested_at    timestamptz not null default now(),
+  primary key (wallet_address, chain, token_address)
+);
+
+-- ============================================================
+-- Module 14 (2026-08-16): X OAuth session storage.
+-- Session id is an opaque, app-generated random token (crypto.randomBytes),
+-- not a DB-generated uuid - no pgcrypto/uuid-ossp extension exists in this
+-- schema, so this follows the existing text-primary-key convention
+-- (wrapped_profiles.wallet_address) rather than introducing one.
+-- refresh_token_encrypted holds X's OAuth2 offline.access refresh token,
+-- encrypted at rest (see src/utils/sessionCrypto.ts) - never stored plain.
+-- ============================================================
+create table if not exists sessions (
+  id                       text primary key,
+  x_user_id                text not null,
+  x_username               text not null,
+  evm_address              text,
+  refresh_token_encrypted  text not null,
+  created_at               timestamptz not null default now(),
+  expires_at               timestamptz not null,
+  last_used_at             timestamptz not null default now()
+);
+create index if not exists idx_sessions_x_user_id
+  on sessions (x_user_id);
+create index if not exists idx_sessions_expires_at
+  on sessions (expires_at);

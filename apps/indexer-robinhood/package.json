@@ -1,0 +1,14 @@
+{
+  "name": "@bankr-wrapped/indexer-robinhood",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "codegen": "envio codegen",
+    "dev": "envio dev",
+    "start": "envio start"
+  },
+  "type": "module",
+  "dependencies": {
+    "envio": "3.6.0"
+  }
+}

@@ -1,0 +1,90 @@
+# Module 2 entity schema — Envio's own database.
+#
+# RESOLVED 2026-08-07 (playbook update): Envio and apps/api are two SEPARATE
+# Postgres instances. Envio owns this schema; apps/api owns only
+# indexed_contracts/indexed_tokens/token_volume_summary/price_cache in its
+# own DB (Module 6). Data flows one direction only: Envio -> apps/api via
+# Module 9's sync job.
+#
+# RESOLVED 2026-08-08 (real design change, not a bug fix): pool matching is
+# back to currency-address matching (KnownAsset), not hook-address matching
+# (the old KnownHook). Confirmed via a real on-chain Create tx: `poolOrHook`
+# is NOT reliably a genuine V4 hook address.
+#
+# FIXED 2026-08-09 (Module 2 diagnosis, real bug — not the hook issue
+# above): PoolManager.Initialize's KnownAsset lookup could race
+# Airlock.Create's write for the same token under Preload Optimization
+# (every handler runs twice; a pool's Initialize preload pass isn't
+# guaranteed to run after its token's Create real-write pass has landed,
+# even when Create happened first on-chain). Confirmed via BIS: KnownAsset
+# existed, WatchedPool never got created. Real-world impact measured at
+# 254,813 of 1,378,735 known tokens (~18.5%) missing a WatchedPool match.
+#
+# Fix: WatchedPool no longer requires a KnownAsset match to be created.
+# Initialize now writes WatchedPool unconditionally with both raw currency
+# addresses; which side (if any) is a Bankr-launched token is resolved
+# lazily at Swap/Collect/Release time instead — those events happen much
+# later than Initialize and are not subject to the same race. The resolved
+# answer is cached back onto the WatchedPool row so it's computed once per
+# pool, not on every event.
+#
+# Tradeoff, accepted: WatchedPool now stores every pool PoolManager ever
+# initializes on this chain, not just Bankr's — there's no way to filter
+# at Initialize time anymore. Base's PoolManager is a shared singleton used
+# by the whole chain, so this table will be larger than before. Flagged
+# as a known consequence, not a new risk — matches the pre-existing
+# Module 9 follow-up note about measuring PoolManager volume before
+# building further filtering optimizations.
+
+type KnownAsset {
+  id: ID! # `${chain}:${tokenAddress}`
+  chain: String!
+  tokenAddress: String!
+  hookAddress: String! # poolOrHook from Airlock.Create — audit-only; NOT reliably a real hook address
+  source: String! # 'doppler' (Clanker confirmed Base-only, not on Robinhood — §2 OQ3)
+}
+
+type KnownToken {
+  id: ID! # `${chain}:${tokenAddress}` — Clanker's own token registry (Module 4)
+  chain: String!
+  tokenAddress: String!
+  source: String! # 'clanker'
+}
+
+type WatchedPool {
+  id: ID! # `${chain}:${poolId}`
+  chain: String!
+  poolId: String!
+  currency0: String! # raw PoolManager.Initialize currency0 — always set, regardless of whether either side is a known Bankr token
+  currency1: String! # raw PoolManager.Initialize currency1 — same
+  tokenAddress: String # null until resolved for Doppler pools (see file header); always set immediately for Clanker pools, which have no lookup race
+  tokenIsToken0: Boolean # null until resolved, same rule as tokenAddress
+}
+
+type IndexedSwap {
+  id: ID! # `${chain}:${txHash}:${logIndex}`
+  chain: String!
+  poolId: String!
+  tokenAddress: String!
+  blockNumber: BigInt!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Timestamp!
+  amountToken: BigInt! # abs(amount0 or amount1), whichever side is the launched token, per tokenIsToken0
+  amountUsd: BigDecimal # left NULL — pricing is Module 5's job, done downstream via Envio's GraphQL API
+}
+
+type IndexedFeeEvent {
+  id: ID! # `${chain}:${txHash}:${logIndex}`
+  chain: String!
+  poolId: String # null for Clanker fee events, which aren't pool-keyed
+  tokenAddress: String!
+  eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned'
+  recipient: String # beneficiary (Release), feeOwner (StoreTokens/ClaimTokens), recipient (ClaimTokensPermissioned); null for Collect
+  amountToken0: BigInt
+  amountToken1: BigInt
+  blockNumber: BigInt!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Timestamp!
+}

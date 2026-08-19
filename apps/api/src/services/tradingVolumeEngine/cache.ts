@@ -1,64 +1,68 @@
+/**
+ * Persistent trading-volume cache backed by Postgres (token_volume_cache).
+ *
+ * Replaces the previous in-memory Map, which lost all cached values on
+ * every process restart/redeploy/serverless cold start -- causing every
+ * wallet request to re-walk the full token list from scratch through the
+ * indexer/provider waterfall every time the process cycled.
+ *
+ * Also caches NEGATIVE results (no provider had the token after the full
+ * waterfall) under a separate, shorter TTL -- these are the calls that
+ * cost 3-60s per token (external provider round-trips) and were
+ * previously re-paid on every single run with no persistence at all.
+ */
+import { tokenVolumeCacheRepository } from "../../repositories/tokenVolumeCacheRepository";
 import type { ChainId, VolumeSource } from "./types";
 
-/**
- * In-memory cache, keyed by "chain:address". Gets the millisecond-response
- * goal working immediately with zero infra.
- *
- * Known limitation: this resets on every Railway redeploy/restart, and
- * doesn't share state across multiple API instances if you ever scale
- * horizontally. When that becomes a real problem, swap the two functions
- * below (getCached / setCached) for reads/writes against a Postgres table,
- * e.g.:
- *
- *   CREATE TABLE token_volume_cache (
- *     chain TEXT NOT NULL,
- *     address TEXT NOT NULL,
- *     volume_usd NUMERIC,
- *     source TEXT,
- *     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- *     PRIMARY KEY (chain, address)
- *   );
- *
- * Everything else in this module (waterfall, aggregator) stays identical —
- * only these two functions need to change.
- */
+const TTL_MS = 1000 * 60 * 60 * 6; // 6 hours - positive (resolved) results
+const NOT_FOUND_TTL_MS = 1000 * 60 * 60; // 1 hour - negative (exhausted waterfall) results
 
-interface CacheEntry {
-  volumeUsd: number;
-  source: VolumeSource;
+export const NOT_FOUND_SOURCE = "not_found" as const;
+
+export interface CacheEntry {
+  volumeUsd: number | null;
+  source: VolumeSource | typeof NOT_FOUND_SOURCE;
   cachedAt: number;
+  resolved: boolean;
 }
 
-const store = new Map<string, CacheEntry>();
-
-// Longer TTL than a typical price cache — full lifetime-volume aggregation
-// per token is now a much heavier call (paginated OHLCV history, not a
-// single snapshot), so cache hits matter more here than before.
-const TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
-
-function cacheKey(chain: ChainId, address: string): string {
-  return `${chain}:${address.toLowerCase()}`;
-}
-
-export function getCached(
+export async function getCached(
   chain: ChainId,
   address: string,
-): CacheEntry | null {
-  const entry = store.get(cacheKey(chain, address));
+): Promise<CacheEntry | null> {
+  const entry = await tokenVolumeCacheRepository.get(chain, address);
   if (!entry) return null;
-  if (Date.now() - entry.cachedAt > TTL_MS) return null;
-  return entry;
+
+  const isNotFound = entry.source === NOT_FOUND_SOURCE;
+  const ttl = isNotFound ? NOT_FOUND_TTL_MS : TTL_MS;
+
+  const cachedAt = entry.updatedAt.getTime();
+  if (Date.now() - cachedAt > ttl) return null;
+
+  return {
+    volumeUsd: isNotFound ? null : entry.volumeUsd,
+    source: entry.source as CacheEntry["source"],
+    cachedAt,
+    resolved: !isNotFound,
+  };
 }
 
-export function setCached(
+export async function setCached(
   chain: ChainId,
   address: string,
   volumeUsd: number,
   source: VolumeSource,
-): void {
-  store.set(cacheKey(chain, address), {
-    volumeUsd,
-    source,
-    cachedAt: Date.now(),
-  });
+): Promise<void> {
+  await tokenVolumeCacheRepository.set(chain, address, volumeUsd, source);
+}
+
+// Call this when the full provider waterfall is exhausted and nothing
+// resolved. Do NOT call this for a `stopFallback` result (indexer knows
+// the token but backfill is incomplete) -- that case should stay cheap
+// to recheck every run since it can resolve at any time.
+export async function setNotFoundCached(
+  chain: ChainId,
+  address: string,
+): Promise<void> {
+  await tokenVolumeCacheRepository.set(chain, address, 0, NOT_FOUND_SOURCE);
 }

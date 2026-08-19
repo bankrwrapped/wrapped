@@ -56,9 +56,6 @@ export interface DailyEarning {
 
 export interface CreatorFeesResponse {
   address: string;
-  // NOTE: this top-level field is unreliable - observed as "base" even when
-  // every token inside was actually "robinhood". Always read chain from each
-  // individual token entry, never from here.
   chain: string;
   days: number;
   tokens: CreatorFeeTokenEntry[];
@@ -90,7 +87,6 @@ export interface BeneficiaryFeeTokenEntry {
 
 export interface BeneficiaryFeesResponse {
   address: string;
-  // Same caveat as CreatorFeesResponse.chain - ignore, use per-token chain.
   chain: string;
   totalLaunches: number;
   poolsWithShares: number;
@@ -104,11 +100,8 @@ export interface WrappedTokenEntry {
   name: string;
   symbol: string;
   chain: Chain;
-  // Raw WETH (claimable + claimed) attributable to this specific token, for
-  // both Doppler and Clanker sources. Displayed as-is, no USD conversion -
-  // decision made after a session of confusing price-conversion swings:
-  // ETH is an objective fact with no pricing-methodology debate attached.
   feesEarnedEth: number;
+  source: string;
 }
 
 export interface WrappedUser {
@@ -121,50 +114,65 @@ export interface WrappedUser {
 
 export type FeesFetchStatus = "ok" | "unavailable";
 
+export interface WrappedTradingVolume {
+  totalVolumeUsd: number;
+  status: "pending" | "ok";
+  isComplete: boolean;
+  tokensTotal: number;
+  tokensComplete: number;
+  tokensInProgress: number;
+  tokensPending: number;
+  tokensFailed: number;
+  updatedAt: string;
+}
+
 export interface WrappedPayload {
   user: WrappedUser;
-  tokens: WrappedTokenEntry[]; // "launched" tokens - from creator-fees
-  pleaseBroTokens: WrappedTokenEntry[]; // from beneficiary-fees
+  tokens: WrappedTokenEntry[];
+  pleaseBroTokens: WrappedTokenEntry[];
   earnings: {
-    // USD fields kept INTERNAL ONLY - never displayed, used solely for
-    // archetype thresholds and leaderboard ranking (explicit decision:
-    // display switches fully to ETH, but ranking/archetype stay USD-based).
     creatorEarnings: number;
     pleaseBroEarnings: number;
     total: number;
-    // ETH fields - what's actually shown to users.
     creatorEarningsEth: number;
     pleaseBroEarningsEth: number;
     totalEth: number;
   };
   claimable: {
-    unclaimed: number; // USD, internal only (archetype thresholds)
-    unclaimedEth: number; // ETH, displayed
+    unclaimed: number;
+    unclaimedEth: number;
   };
-  // Best single day of creator earnings, in raw ETH. No longer priced at
-  // all (previously historically-priced in USD) - since we display raw
-  // ETH now, there's no conversion step, and no historical-price fetching
-  // needed for this feature anymore.
   bestDay: { date: string; eth: number } | null;
-  // Full day-by-day creator earnings timeline, raw ETH, ascending by date.
   dailyEarnings: { date: string; eth: number }[];
-  // Total number of times this wallet has claimed creator fees (lifetime).
   claimCount: number;
-  // Longest run of consecutive calendar days with nonzero creator earnings.
   longestStreakDays: number;
   summary: {
     tokensLaunched: number;
-    // False only when every activity signal is genuinely zero AND both fee
-    // endpoints returned "ok" - a Bankr outage must never be mistaken for
-    // "this user has no activity" (see meta.*FeesStatus).
     hasActivity: boolean;
   };
-  // Distinguishes "genuinely zero" from "Bankr's endpoint failed" so the
-  // frontend can show an honest error state instead of a fake empty one.
+  // Distinguishes "genuinely zero" from "Bankr's endpoint failed" (or, as
+  // of Module 8, the indexer failing) so the frontend can show an honest
+  // error state instead of a fake empty one.
   meta: {
     creatorFeesStatus: FeesFetchStatus;
     beneficiaryFeesStatus: FeesFetchStatus;
+    // Module 8 - added alongside earningsFromIndexer below. Originally
+    // OQ8 locked earningsFromIndexer as a bare number with no status
+    // field; that gap (no way to tell "genuinely zero" from "this
+    // specific fetch failed", the exact problem creatorFeesStatus/
+    // beneficiaryFeesStatus already solve for the Bankr side) is fixed
+    // for real here, same pattern, not a special case.
+    earningsFromIndexerStatus: FeesFetchStatus;
   };
+  tradingVolume: WrappedTradingVolume;
+  // Module 8's real on-chain earnings breakdown (indexed_fee_events,
+  // Doppler Release + Clanker ClaimTokens/ClaimTokensPermissioned),
+  // doppler+clanker summed. OQ8 FINAL, 2026-08-15: single combined ETH
+  // total, no per-source split exposed. Additive alongside `earnings`
+  // above, which stays sourced from Bankr's own creator-fees/
+  // beneficiary-fees API - this is a separate, independently-fetched
+  // number, not a replacement for or component of `earnings.totalEth`.
+  earningsFromIndexer: number;
 }
 
 export interface WrappedCacheRow {
@@ -172,8 +180,6 @@ export interface WrappedCacheRow {
   username: string;
   payload: WrappedPayload;
   updatedAt: string;
-  // Computed live on every request (not persisted) - a user's rank shifts
-  // as other users get wrapped, so caching it alongside payload would go stale.
   rank: number;
   totalUsers: number;
   percentile: number;
@@ -188,11 +194,8 @@ export interface TopTraderEntry {
   avatarUrl: string;
   tokensLaunched: number;
   pleaseBroCount: number;
-  // USD kept for internal ranking use only (getTopTraders orders by this
-  // column server-side) - not necessarily displayed by the frontend.
   totalEarningsUsd: number;
   unclaimedUsd: number;
-  // ETH - what's actually shown on the leaderboard page.
   totalEarningsEth: number;
   unclaimedEth: number;
   updatedAt: string;

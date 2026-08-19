@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+#
+# Module 3 — Robinhood Chain Indexer (Doppler), isolated on purpose.
+# SPLIT OUT 2026-08-08 after config.yaml got overwritten by Module 2/4's
+# Base+Clanker merge (their own header note confirms Robinhood was
+# "intentionally omitted" from that shared file). Postgres data itself
+# (schema `public`) was untouched — only this config file was lost —
+# reconstructed here from Module 3's confirmed real values.
+#
+# Run this file explicitly: `bunx envio dev --config config.robinhood.yaml`
+# Do NOT let other modules merge into this file. Do NOT merge this back
+# into the shared config.yaml — that's what caused the collision.
+
+name: bankr-wrapped-base-indexer
+
+contracts:
+  - name: Airlock
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Create(address asset, address indexed numeraire, address initializer, address poolOrHook)"
+        name: Create
+
+  - name: PoolManager
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)"
+        name: Initialize
+      - event: "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
+        name: Swap
+        field_selection:
+          transaction_fields:
+            - hash
+
+  - name: StreamableFeesLockerV2
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Collect(bytes32 indexed poolId, uint256 fees0, uint256 fees1)"
+        name: Collect
+        field_selection:
+          transaction_fields:
+            - hash
+      - event: "Release(bytes32 indexed poolId, address indexed beneficiary, uint256 fees0, uint256 fees1)"
+        name: Release
+        field_selection:
+          transaction_fields:
+            - hash
+
+chains:
+  - id: 4663 # Robinhood Chain mainnet
+    start_block: 646829 # Airlock's real deployment block, confirmed via robinhoodchain.blockscout.com
+    rpc:
+      - url: https://rpc.arrowrpc.com
+        for: sync
+      - url: https://rpc.mainnet.chain.robinhood.com
+        for: sync
+      - url: https://rpc.arrowrpc.com
+        for: realtime
+    contracts:
+      - name: Airlock
+        address:
+          - "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862"
+      - name: PoolManager
+        address:
+          - "0x8366a39CC670B4001A1121B8F6A443A643e40951"
+      - name: StreamableFeesLockerV2
+        address:
+          - "0x7b6147ac3f615bdb764e7ebd5f517dac1ad163b8"

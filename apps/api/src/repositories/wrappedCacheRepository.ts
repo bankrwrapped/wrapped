@@ -175,4 +175,21 @@ export const wrappedCacheRepository = {
       updatedAt: new Date(r.updated_at).toISOString(),
     }));
   },
+
+  // Background trading-volume computations finish independently of the
+  // normal fetch/upsert cycle (can take minutes for a large wallet - see
+  // Module 7's real measured timings). A full upsert here would require
+  // re-deriving the whole payload and risks clobbering newer data written
+  // by a concurrent normal request. This does a narrow, additive patch
+  // instead: touches only payload.tradingVolume, nothing else.
+  async updateTradingVolume(
+    wallet: string,
+    tradingVolume: WrappedPayload["tradingVolume"]
+  ): Promise<void> {
+    await db`
+      update wrapped_profiles
+      set payload = jsonb_set(payload, '{tradingVolume}', ${JSON.stringify(tradingVolume)}::jsonb)
+      where wallet_address = ${wallet}
+    `;
+  },
 };

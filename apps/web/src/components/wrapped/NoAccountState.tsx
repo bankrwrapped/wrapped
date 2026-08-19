@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
+import { Backdrop } from "@/components/wrapped/terminal/Backdrop";
 
 const TEASER_ITEMS = [
   { emoji: "\u{1F4B0}", label: "Total earned" },
@@ -16,7 +16,7 @@ type Props = {
 export function NoAccountState({ onBack }: Props) {
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-5 py-12">
-      <LiquidGlassBackdrop />
+      <Backdrop />
 
       <div className="relative z-10 w-full max-w-lg space-y-7 text-center">
         <motion.div
