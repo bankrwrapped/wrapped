@@ -91,7 +91,7 @@ type ApiWrappedCacheRow = {
   percentile: number;
 };
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_URL = import.meta.env.VITE_API_URL ?? "https://wrapped-production.up.railway.app";
 
 function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
