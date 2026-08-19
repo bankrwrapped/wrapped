@@ -25,6 +25,35 @@ function toDateStr(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().split("T")[0];
 }
 
+// --- Failure cache: separate from the success cache (priceCacheRepository).
+// Keyed at the SAME granularity as the success cache (day bucket, via
+// toDateStr) rather than raw unixSeconds - two lookups landing in the same
+// calendar day for the same token are the same GoldRush call either way,
+// so they should share one failure entry, not fragment into near-duplicates.
+// A failed lookup is remembered for FAILURE_TTL_MS so a retried request for
+// the same wallet doesn't re-queue an already-doomed GoldRush call and add
+// load to a queue that may already be near its 30s cap.
+const FAILURE_TTL_MS = 90_000; // long enough to skip a retry-storm window, short enough to self-heal once contention clears
+const failedLookupCache = new Map<string, number>(); // key -> expiry timestamp
+
+function failureKey(chain: string, tokenAddress: string, dateStr: string): string {
+  return chain + ":" + tokenAddress.toLowerCase() + ":" + dateStr;
+}
+
+function isRecentFailure(key: string): boolean {
+  const expiry = failedLookupCache.get(key);
+  if (expiry === undefined) return false;
+  if (Date.now() >= expiry) {
+    failedLookupCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function recordFailure(key: string): void {
+  failedLookupCache.set(key, Date.now() + FAILURE_TTL_MS);
+}
+
 interface GoldRushPriceItem {
   date: string;
   price: number;
@@ -41,6 +70,14 @@ function toGoldRushChainSlug(chain: string): string {
   throw new Error(`toGoldRushChainSlug: no GoldRush chain slug mapping for chain=${chain}`);
 }
 
+// --- INSTRUMENTATION (issue #1 diagnosis, 2026-08-18) ---
+// Every log line below is additive only -- no control flow changed. Goal:
+// distinguish "GoldRush timed out", "GoldRush queue backed up", "GoldRush
+// genuinely had no data", "GeckoTerminal fallback recovered it", and
+// "GeckoTerminal fallback was skipped because the swap is too old" -- all
+// four currently collapse into the same silent `null` at the call site.
+// Remove or downgrade to debug-level once the sample run has an answer.
+
 async function fetchFromGoldRushOnce(
   chain: string,
   tokenAddress: string,
@@ -52,7 +89,23 @@ async function fetchFromGoldRushOnce(
     "?from=" + dateStr + "&to=" + dateStr +
     "&key=" + env.GOLDRUSH_API_KEY;
 
-  return fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const startedAt = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    console.log(
+      `[pricing] goldrush-ok chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+      `status=${res.status} elapsedMs=${Date.now() - startedAt}`,
+    );
+    return res;
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    console.log(
+      `[pricing] goldrush-${isTimeout ? "TIMEOUT" : "NETWORK_ERROR"} ` +
+      `chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+      `elapsedMs=${Date.now() - startedAt} err=${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
 }
 
 async function fetchFromGoldRush(
@@ -62,7 +115,14 @@ async function fetchFromGoldRush(
 ): Promise<number> {
   const dateStr = toDateStr(unixSeconds);
 
+  const queueStart = Date.now();
   await goldRushRateLimiter.beforePriceLookup();
+  const queueWaitMs = Date.now() - queueStart;
+  if (queueWaitMs > 1000) {
+    console.log(
+      `[pricing] goldrush-queue-wait chain=${chain} token=${tokenAddress} date=${dateStr} waitMs=${queueWaitMs}`,
+    );
+  }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetchFromGoldRushOnce(chain, tokenAddress, dateStr);
@@ -76,6 +136,10 @@ async function fetchFromGoldRush(
       }
       const retryAfterHeader = res.headers.get("retry-after");
       const backoffMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : 2 ** attempt * 1000;
+      console.log(
+        `[pricing] goldrush-429 chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+        `attempt=${attempt} backoffMs=${backoffMs}`,
+      );
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
       continue;
     }
@@ -91,6 +155,10 @@ async function fetchFromGoldRush(
 
     const items = data.data?.[0]?.items;
     if (!items || items.length === 0) {
+      console.log(
+        `[pricing] goldrush-no-data chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+        `(token may be unlisted or untraded that day)`,
+      );
       throw new Error("GoldRush returned no price data for " + chain + ":" + tokenAddress + " on " + dateStr + " - token may be unlisted or untraded that day");
     }
 
@@ -112,9 +180,21 @@ export async function getHistoricalPriceUsd(
   poolId: string
 ): Promise<number> {
   const bucket = toDayBucket(unixSeconds);
+  const dateStr = toDateStr(unixSeconds);
 
   const cached = await priceCacheRepository.find(chain, tokenAddress, bucket);
   if (cached !== null) return cached;
+
+  const fKey = failureKey(chain, tokenAddress, dateStr);
+  if (isRecentFailure(fKey)) {
+    console.log(
+      `[pricing] EXCLUDED-cached-failure chain=${chain} token=${tokenAddress} date=${dateStr}`,
+    );
+    throw new Error(
+      "getHistoricalPriceUsd: skipping " + chain + ":" + tokenAddress + " on " + dateStr +
+      " - recent failure cached, avoiding re-queue on a possibly-still-saturated GoldRush queue"
+    );
+  }
 
   try {
     const price = await fetchFromGoldRush(chain, tokenAddress, unixSeconds);
@@ -127,11 +207,21 @@ export async function getHistoricalPriceUsd(
     // window or GeckoTerminal itself has nothing - in both cases we rethrow
     // the original GoldRush error so callers see one consistent failure
     // reason, and so upstream exclude-not-fail handling still fires.
-    const fallbackPrice = await fetchGeckoTerminalPriceAtTimestamp(chain, poolId, unixSeconds);
+    const fallbackPrice = await fetchGeckoTerminalPriceAtTimestamp(chain, poolId, unixSeconds, tokenAddress);
     if (fallbackPrice !== null) {
+      console.log(
+        `[pricing] fallback-recovered chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+        `goldrushErr="${goldRushErr instanceof Error ? goldRushErr.message : String(goldRushErr)}"`,
+      );
       await priceCacheRepository.upsert(chain, tokenAddress, bucket, fallbackPrice);
       return fallbackPrice;
     }
+    console.log(
+      `[pricing] EXCLUDED chain=${chain} token=${tokenAddress} date=${dateStr} ` +
+      `goldrushErr="${goldRushErr instanceof Error ? goldRushErr.message : String(goldRushErr)}" ` +
+      `ageDays=${((Date.now() / 1000 - unixSeconds) / 86400).toFixed(1)}`,
+    );
+    recordFailure(fKey);
     throw goldRushErr;
   }
 }

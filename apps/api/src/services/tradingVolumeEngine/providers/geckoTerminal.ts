@@ -92,7 +92,7 @@ interface GeckoPool {
  * OHLCV is pool-scoped, not token-scoped — a token can trade in several
  * pools. Resolve to the single highest-liquidity pool for lifetime volume.
  */
-async function resolveTopPool(
+export async function resolveTopPool(
   network: string,
   tokenAddress: string,
 ): Promise<GeckoPoolAttributes | null> {

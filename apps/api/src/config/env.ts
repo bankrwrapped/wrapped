@@ -16,7 +16,23 @@ export const env = {
   // Base RPC endpoint - used by decimalsService.ts for live on-chain
   // decimals lookups.
   BASE_RPC_URL: required("BASE_RPC_URL"),
+  // Robinhood Chain RPC endpoint - used by decimalsService.ts for live
+  // on-chain decimals lookups on chain=robinhood. Defaults to the public
+  // endpoint (rate-limited, fine for our low call volume); override via
+  // env if a dedicated provider is set up later.
+  ROBINHOOD_RPC_URL: process.env.ROBINHOOD_RPC_URL || "https://rpc.mainnet.chain.robinhood.com",
   // Envio's GraphQL endpoint - read path for envioClient.ts's indexed
   // Swap/Release/Collect event queries.
   ENVIO_GRAPHQL_URL: required("ENVIO_GRAPHQL_URL"),
+  // Module 14: X OAuth 2.0 (Web App / confidential client, registered in
+  // X's Developer Console). Client Secret is what makes it confidential -
+  // required for the token exchange, unlike a public/SPA client.
+  X_CLIENT_ID: required("X_CLIENT_ID"),
+  X_CLIENT_SECRET: required("X_CLIENT_SECRET"),
+  // Must exact-match a Callback URL registered in the X Developer Console -
+  // https://wrapped-production.up.railway.app/auth/x/callback in production.
+  X_REDIRECT_URI: required("X_REDIRECT_URI"),
+  // 64-char hex (32 bytes) - generate with `openssl rand -hex 32`. Encrypts
+  // refresh tokens at rest in the sessions table (see sessionCrypto.ts).
+  SESSION_ENC_KEY: required("SESSION_ENC_KEY"),
 };

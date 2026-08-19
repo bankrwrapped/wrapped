@@ -23,6 +23,32 @@ export interface ProviderVolumeResult {
   volumeUsd: number;
 }
 
+/**
+ * A provider can explicitly tell the waterfall to stop.
+ *
+ * This is required for the indexer: when a token exists in our index but
+ * historical backfill is incomplete, we must NOT fall through to external
+ * providers. The token is intentionally unresolved until our indexer
+ * finishes.
+ */
+export interface ProviderStopResult {
+  stopFallback: true;
+  reason: "backfill_in_progress";
+}
+
+/**
+ * A provider can explicitly tell the waterfall to stop.
+ *
+ * This is required for the indexer: when a token exists in our index but
+ * historical backfill is incomplete, we must NOT fall through to external
+ * providers. The token is intentionally unresolved until our indexer
+ * finishes.
+ */
+export interface ProviderStopResult {
+  stopFallback: true;
+  reason: "backfill_in_progress";
+}
+
 export interface TokenVolumeResult {
   token: TokenRef;
   volumeUsd: number | null;

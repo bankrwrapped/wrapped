@@ -42,3 +42,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Ignore backup files
+*.bak
+*.bak[0-9]
+*.bak.*

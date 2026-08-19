@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { Footer } from "@/components/wrapped/Footer";
-import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
+import { Backdrop } from "@/components/wrapped/terminal/Backdrop";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -17,7 +17,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 function BrandBackdrop() {
   return (
     <>
-      <LiquidGlassBackdrop />
+      <Backdrop />
       <div className="fixed left-5 top-5 z-20 flex items-center gap-2.5">
         <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
           <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
@@ -108,7 +108,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;800&family=Inter:wght@400;500;600&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],

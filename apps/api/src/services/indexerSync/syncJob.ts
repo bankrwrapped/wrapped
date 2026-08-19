@@ -2,6 +2,7 @@ import { fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
 import { getDecimals } from "./decimalsService";
 import { getHistoricalPriceUsd } from "../pricingService";
 import { indexedTokensRepository } from "../../repositories/indexedTokensRepository";
+import { checkAndNotifyWalletsForToken } from "./wrappedNotify";
 import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSummaryRepository";
 import type { IndexedSwapRow } from "./envioClient";
 
@@ -75,12 +76,17 @@ function groupSwapsByHour(swaps: IndexedSwapRow[]): Map<number, PriceGroup> {
   return groups;
 }
 
+// NOTE: callers must claim this token via
+// indexedTokensRepository.claimForBackfill() BEFORE calling this function.
+// backfillToken() no longer sets 'in_progress' itself on entry -- that's
+// now done atomically as part of the claim (see backfillTrigger.ts /
+// backfillSweep.ts), so two concurrent callers can't both start working on
+// the same token. This function assumes the claim already happened and
+// only concerns itself with doing the work and recording the outcome.
 export async function backfillToken(chain: string, tokenAddress: string): Promise<void> {
   if (chain !== "base") {
     throw new Error(`backfillToken: only 'base' is supported right now — got chain=${chain}`);
   }
-
-  await indexedTokensRepository.setStatus(chain, tokenAddress, "in_progress");
 
   try {
     const decimals = await getDecimals(chain, tokenAddress);
@@ -123,6 +129,16 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
 
       cursor = page[page.length - 1].blockNumber;
       if (page.length < 1000) break;
+
+      // Long-running backfill: touch last_refreshed_at as we go, not just
+      // at the very end. This is what lets claimForBackfill's staleness
+      // check tell "still actively working through a long token history"
+      // apart from "died after starting" -- without this, a job with many
+      // pages would look stale (and be eligible for the sweep to steal)
+      // purely because backfill_started_at is old, even while genuinely
+      // healthy. updateCheckpoint() below already sets last_refreshed_at,
+      // so this reuses that same write on every page, not just the last.
+      await indexedTokensRepository.updateCheckpoint(chain, tokenAddress, highestBlockSeen);
     }
 
     await tokenVolumeSummaryRepository.setTotal(chain, tokenAddress, totalVolumeUsd, swapCount);
@@ -141,6 +157,9 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
       tokenAddress,
       chainFullySynced ? "complete" : "in_progress",
     );
+    if (chainFullySynced) {
+      await checkAndNotifyWalletsForToken(chain, tokenAddress);
+    }
   } catch (err) {
     await indexedTokensRepository.setStatus(chain, tokenAddress, "failed");
     throw err;

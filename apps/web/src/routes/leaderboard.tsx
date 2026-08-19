@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Crown } from "lucide-react";
-import { LiquidGlassBackdrop } from "@/components/wrapped/LiquidGlassBackdrop";
+import { Backdrop } from "@/components/wrapped/terminal/Backdrop";
 import { fetchLeaderboard, formatEth, type LeaderboardEntry } from "@/lib/wrapped-data";
 
 export const Route = createFileRoute("/leaderboard")({
@@ -100,7 +100,7 @@ function LeaderboardPage() {
 
   return (
     <div className="relative min-h-screen">
-      <LiquidGlassBackdrop />
+      <Backdrop />
 
       <div className="relative z-10 mx-auto min-h-screen w-full max-w-xl px-5 py-8">
         <motion.div

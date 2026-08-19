@@ -68,4 +68,18 @@ export const walletBackfillRequestsRepository = {
 
     return summary;
   },
+
+  // New: needed because backfill completion is written per-TOKEN
+  // (indexed_tokens.backfill_status), but notification needs to happen
+  // per-WALLET. One token finishing can affect several wallets at once
+  // (any wallet holding that token) -- this finds all of them so each
+  // can be re-checked individually for full completion.
+  async getWalletsForToken(chain: string, tokenAddress: string): Promise<string[]> {
+    const rows = (await db`
+      select distinct wallet_address
+      from wallet_backfill_requests
+      where chain = ${chain} and token_address = ${tokenAddress}
+    `) as { wallet_address: string }[];
+    return rows.map((r) => r.wallet_address);
+  },
 };

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
+import { Route as SoonRouteImport } from './routes/soon'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const LeaderboardRoute = LeaderboardRouteImport.update({
   path: '/leaderboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SoonRoute = SoonRouteImport.update({
+  id: '/soon',
+  path: '/soon',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/soon': typeof SoonRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/soon': typeof SoonRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/leaderboard': typeof LeaderboardRoute
+  '/soon': typeof SoonRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/leaderboard'
+  fullPaths: '/' | '/about' | '/leaderboard' | '/soon'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/leaderboard'
-  id: '__root__' | '/' | '/about' | '/leaderboard'
+  to: '/' | '/about' | '/leaderboard' | '/soon'
+  id: '__root__' | '/' | '/about' | '/leaderboard' | '/soon'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   LeaderboardRoute: typeof LeaderboardRoute
+  SoonRoute: typeof SoonRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LeaderboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/soon': {
+      id: '/soon'
+      path: '/soon'
+      fullPath: '/soon'
+      preLoaderRoute: typeof SoonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   LeaderboardRoute: LeaderboardRoute,
+  SoonRoute: SoonRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

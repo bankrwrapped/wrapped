@@ -11,6 +11,7 @@ interface IndexedTokenRow {
   first_seen_block: string | null;
   backfill_status: BackfillStatus;
   backfill_checkpoint_block: string | null;
+  backfill_started_at: Date | null;
   last_refreshed_at: Date | null;
   decimals: number | null;
 }
@@ -68,6 +69,65 @@ export const indexedTokensRepository = {
     return (await db`
       select * from indexed_tokens
       where chain = ${chain} and backfill_status = 'complete'
+    `) as IndexedTokenRow[];
+  },
+
+  // ---- Retry/anti-stall additions ----
+  //
+  // Atomic claim: single UPDATE...WHERE...RETURNING so two concurrent
+  // callers racing on the same token can't both "win" a retry. The row is
+  // eligible if it's 'failed', OR it's 'pending'/'in_progress' but has gone
+  // silent -- silence is judged by whichever is MORE RECENT of
+  // backfill_started_at and last_refreshed_at, not just started_at alone.
+  // Using started_at alone would incorrectly reclaim a job that's genuinely
+  // still running and updating its checkpoint page-by-page on a long
+  // token history; last_refreshed_at moving forward is real evidence of
+  // life even if the job has been running longer than the stale threshold.
+  async claimForBackfill(
+    chain: string,
+    tokenAddress: string,
+    staleThresholdMs: number,
+  ): Promise<boolean> {
+    const staleCutoff = new Date(Date.now() - staleThresholdMs);
+    const rows = (await db`
+      update indexed_tokens
+      set backfill_status = 'in_progress', backfill_started_at = now()
+      where chain = ${chain}
+        and token_address = ${tokenAddress}
+        and (
+          backfill_status = 'failed'
+          or (
+            backfill_status in ('pending', 'in_progress')
+            and greatest(
+              coalesce(backfill_started_at, 'epoch'::timestamptz),
+              coalesce(last_refreshed_at, 'epoch'::timestamptz)
+            ) < ${staleCutoff}
+          )
+        )
+      returning token_address
+    `) as { token_address: string }[];
+    return rows.length > 0;
+  },
+
+  // Candidates only, for the periodic sweep -- the sweep must still call
+  // claimForBackfill per-token before actually retrying, since this list
+  // can go stale between being read and being acted on (e.g. a live user
+  // request claims the same token in between).
+  async listStuckCandidates(chain: string, staleThresholdMs: number): Promise<IndexedTokenRow[]> {
+    const staleCutoff = new Date(Date.now() - staleThresholdMs);
+    return (await db`
+      select * from indexed_tokens
+      where chain = ${chain}
+        and (
+          backfill_status = 'failed'
+          or (
+            backfill_status in ('pending', 'in_progress')
+            and greatest(
+              coalesce(backfill_started_at, 'epoch'::timestamptz),
+              coalesce(last_refreshed_at, 'epoch'::timestamptz)
+            ) < ${staleCutoff}
+          )
+        )
     `) as IndexedTokenRow[];
   },
 };

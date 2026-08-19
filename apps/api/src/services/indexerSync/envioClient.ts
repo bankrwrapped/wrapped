@@ -43,10 +43,13 @@ export const PAGE_SIZE = 1000; // <- only change on this line: added `export`
 // taken on the doc's word alone: base_IndexedSwap / robinhood_IndexedSwap.
 // Do NOT reintroduce base_fix_ prefixed names or unprefixed-for-Robinhood-
 // only names -- those were transient tracking-state artifacts, now dead.
-const SWAP_TABLE: Record<string, string> = {
-  base: "base_IndexedSwap",
-  robinhood: "robinhood_IndexedSwap",
-};
+// CORRECTED 2026-08-16: confirmed live via Hasura schema introspection -
+// root fields are NOT chain-prefixed. One IndexedSwap table across both
+// chains, disambiguated by the `chain` argument in the where clause below,
+// not by table name. Prior base_/robinhood_ prefix naming (playbook §6.5,
+// "confirmed live 2026-08-09") no longer matches reality.
+const SWAP_ROOT_FIELD = "IndexedSwap";
+const SUPPORTED_CHAINS = new Set(["base", "robinhood"]);
 
 export async function fetchIndexedSwapsPage(
   chain: string,
@@ -54,10 +57,10 @@ export async function fetchIndexedSwapsPage(
   fromBlockExclusive: string,
   limit: number = PAGE_SIZE,
 ): Promise<IndexedSwapRow[]> {
-  const rootField = SWAP_TABLE[chain];
-  if (!rootField) {
-    throw new Error(`fetchIndexedSwapsPage: no known table for chain=${chain}`);
+  if (!SUPPORTED_CHAINS.has(chain)) {
+    throw new Error(`fetchIndexedSwapsPage: unsupported chain=${chain}`);
   }
+  const rootField = SWAP_ROOT_FIELD;
 
   const query = `
     query SwapsPage($chain: String!, $token: String!, $fromBlock: numeric!, $limit: Int!) {
@@ -86,32 +89,39 @@ export async function fetchIndexedSwapsPage(
 // end_block is nullable (continuous indexing to head, no fixed target), so
 // "synced" compares progress_block against source_block (current chain
 // head), never end_block.
-const CHAIN_METADATA_TABLE: Record<number, string> = {
-  8453: "base_ChainMetadata",
-  4663: "robinhood_ChainMetadata",
-};
+// CORRECTED 2026-08-16: confirmed live via schema introspection - the
+// real table is Envio's own standard sync-status table (`chain_metadata`,
+// lowercase/snake_case, distinct naming convention from IndexedSwap/
+// IndexedFeeEvent/WatchedPool because it's stock Envio infra, not a custom
+// entity). No `id`/`progress_block`/`source_block` fields exist - real
+// fields are chain_id, block_height, start_block, end_block,
+// latest_processed_block, latest_fetched_block_number,
+// first_event_block_number, timestamp_caught_up_to_head_or_endblock,
+// is_hyper_sync, num_batches_fetched, num_events_processed.
+//
+// FLAGGED - inferred from field name, not confirmed against docs or a
+// known-synced-vs-known-lagging chain: using
+// timestamp_caught_up_to_head_or_endblock being non-null as the "synced"
+// signal, since that's what the field name directly states. Verify this
+// actually flips from null to a real timestamp on a chain you know is
+// still catching up, before trusting this in anything that gates on it.
+const CHAIN_METADATA_ROOT_FIELD = "chain_metadata";
 
 export async function isChainFullySynced(chainId: number): Promise<boolean> {
-  const rootField = CHAIN_METADATA_TABLE[chainId];
-  if (!rootField) {
-    throw new Error(`isChainFullySynced: no known ChainMetadata table for chainId=${chainId}`);
-  }
-
   const query = `
-    query ChainMeta($id: Int!) {
-      ${rootField}(where: { id: { _eq: $id } }) {
-        progress_block
-        source_block
+    query ChainMeta($chainId: Int!) {
+      ${CHAIN_METADATA_ROOT_FIELD}(where: { chain_id: { _eq: $chainId } }) {
+        timestamp_caught_up_to_head_or_endblock
       }
     }
   `;
-  const data = await envioQuery<Record<string, { progress_block: number; source_block: number }[]>>(
+  const data = await envioQuery<Record<string, { timestamp_caught_up_to_head_or_endblock: string | null }[]>>(
     query,
-    { id: chainId },
+    { chainId },
   );
-  const row = data[rootField][0];
+  const row = data[CHAIN_METADATA_ROOT_FIELD][0];
   if (!row) return false;
-  return row.progress_block >= row.source_block;
+  return row.timestamp_caught_up_to_head_or_endblock !== null;
 }
 
 // =============================================================================
@@ -134,10 +144,9 @@ export interface IndexedFeeEventRow {
   timestamp: string;
 }
 
-const FEE_EVENT_TABLE: Record<string, string> = {
-  base: "base_IndexedFeeEvent",
-  robinhood: "robinhood_IndexedFeeEvent",
-};
+// CORRECTED 2026-08-16: same fix as SWAP_ROOT_FIELD above, confirmed via
+// the same schema introspection - IndexedFeeEvent is not chain-prefixed.
+const FEE_EVENT_ROOT_FIELD = "IndexedFeeEvent";
 
 export async function fetchIndexedFeeEventsPage(
   chain: string,
@@ -145,10 +154,10 @@ export async function fetchIndexedFeeEventsPage(
   fromBlockExclusive: string,
   limit: number = PAGE_SIZE,
 ): Promise<IndexedFeeEventRow[]> {
-  const rootField = FEE_EVENT_TABLE[chain];
-  if (!rootField) {
-    throw new Error(`fetchIndexedFeeEventsPage: no known table for chain=${chain}`);
+  if (!SUPPORTED_CHAINS.has(chain)) {
+    throw new Error(`fetchIndexedFeeEventsPage: unsupported chain=${chain}`);
   }
+  const rootField = FEE_EVENT_ROOT_FIELD;
 
   const query = `
     query FeeEventsPage($chain: String!, $recipient: String!, $fromBlock: numeric!, $limit: Int!) {
@@ -191,24 +200,22 @@ export interface WatchedPoolRow {
   tokenIsToken0: boolean | null; // null = not yet resolved (orphaned/pending)
 }
 
-const WATCHED_POOL_TABLE: Record<string, string> = {
-  base: "base_WatchedPool",
-  robinhood: "robinhood_WatchedPool",
-};
+// CORRECTED 2026-08-16: same fix, same confirmed reason.
+const WATCHED_POOL_ROOT_FIELD = "WatchedPool";
 
 export async function fetchWatchedPool(chain: string, poolId: string): Promise<WatchedPoolRow | null> {
-  const rootField = WATCHED_POOL_TABLE[chain];
-  if (!rootField) {
-    throw new Error(`fetchWatchedPool: no known table for chain=${chain}`);
+  if (!SUPPORTED_CHAINS.has(chain)) {
+    throw new Error(`fetchWatchedPool: unsupported chain=${chain}`);
   }
+  const rootField = WATCHED_POOL_ROOT_FIELD;
 
   const query = `
-    query WatchedPoolLookup($poolId: String!) {
-      ${rootField}(where: { poolId: { _eq: $poolId } }) {
+      query WatchedPoolLookup($chain: String!, $poolId: String!) {
+      ${rootField}(where: { chain: { _eq: $chain }, poolId: { _eq: $poolId } }) {
         id chain poolId currency0 currency1 tokenAddress tokenIsToken0
       }
     }
   `;
-  const data = await envioQuery<Record<string, WatchedPoolRow[]>>(query, { poolId });
+  const data = await envioQuery<Record<string, WatchedPoolRow[]>>(query, { chain, poolId });
   return data[rootField][0] ?? null;
 }
