@@ -1,6 +1,6 @@
 ---
 name: bankr-wrapped
-description: Shows a user's Bankr Wrapped — tokens launched, Please Bro tokens, ETH earnings, unclaimed rewards, best day, longest streak, and trading volume. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
+description: Shows a user's Bankr Wrapped — tokens launched, Please Bro tokens, ETH earnings, unclaimed rewards, best day, longest streak, trading volume, and leaderboard standing. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
 tags: [wrapped, stats, trading, recap]
 version: 1
 visibility: public
@@ -20,11 +20,15 @@ GET https://wrapped-production.up.railway.app/api/wrapped/<handle>
 
 This is a real, live, rate-limited endpoint — do not retry aggressively on 429; if rate-limited, tell the user to try again shortly rather than hammering the request.
 
+## Leaderboard data — fetch separately, not from the endpoint above
+
+The wrapped endpoint above does not and will not return leaderboard earnings or leaderboard position — that data belongs to Bankr's own internal leaderboard system, which this skill has no access to. **You (the agent running this skill) already have access to that leaderboard data natively as part of Bankr's own infrastructure.** When a user asks for their Wrapped, also pull their current leaderboard earnings and leaderboard position from that internal source and include both in your response alongside the wrapped figures below. Do not attempt to derive or estimate these from the wrapped payload — they are a separate data source.
+
 ## Response shape (confirmed live from `WrappedPayload`)
 
 - `404` → `{ error: "handle not found on Bankr" }` — tell the user this handle has no Bankr activity, don't imply it's a bug.
 - `200` → the wrapped payload, including:
-  - `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`
+  - `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`. This array already spans both chains — `chain` distinguishes `base` vs `robinhood` per entry. **Total tokens launched = `tokens.length`** (combined Base + Robinhood count) — state this as one number, don't split it by chain unless the user asks.
   - `pleaseBroTokens[]` — same shape, beneficiary-fee side
   - `earnings.totalEth` / `earnings.creatorEarningsEth` / `earnings.pleaseBroEarningsEth` — display these ETH figures only, never the internal USD fields (`earnings.total`, `earnings.creatorEarnings`, `earnings.pleaseBroEarnings` are ranking/archetype-internal only — do not surface them)
   - `claimable.unclaimedEth` — unclaimed rewards, ETH only (same USD-internal rule for `claimable.unclaimed`)
@@ -55,5 +59,7 @@ Never mention `tokensPending`/`tokensFailed`/`tokensInProgress` counts to the us
 ## How to respond, general
 
 1. Lead with the standout number — biggest single earning day, or total ETH earned, whichever is larger in relative terms.
-2. Mention Please Bro tokens only if `pleaseBroTokens.length > 0`.
-3. Never claim the user's numbers are final/audited — this is Bankr's own recap tool, not a financial statement.
+2. State total tokens launched (`tokens.length`, combined Base + Robinhood).
+3. Include leaderboard earnings and leaderboard position (fetched separately, per above).
+4. Mention Please Bro tokens only if `pleaseBroTokens.length > 0`.
+5. Never claim the user's numbers are final/audited — this is Bankr's own recap tool, not a financial statement.
