@@ -11,7 +11,7 @@
 # Do NOT let other modules merge into this file. Do NOT merge this back
 # into the shared config.yaml — that's what caused the collision.
 
-name: bankr-wrapped-robinhood-indexer
+name: bankr-wrapped-base-indexer
 
 contracts:
   - name: Airlock
