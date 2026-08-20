@@ -11,7 +11,7 @@
 # Do NOT let other modules merge into this file. Do NOT merge this back
 # into the shared config.yaml — that's what caused the collision.
 
-name: bankr-wrapped-base-indexer
+name: bankr-wrapped-robinhood-indexer
 
 contracts:
   - name: Airlock
@@ -49,11 +49,11 @@ chains:
   - id: 4663 # Robinhood Chain mainnet
     start_block: 646829 # Airlock's real deployment block, confirmed via robinhoodchain.blockscout.com
     rpc:
-      - url: https://rpc.arrowrpc.com
-        for: sync
       - url: https://rpc.mainnet.chain.robinhood.com
         for: sync
       - url: https://rpc.arrowrpc.com
+        for: sync
+      - url: https://rpc.mainnet.chain.robinhood.com
         for: realtime
     contracts:
       - name: Airlock
