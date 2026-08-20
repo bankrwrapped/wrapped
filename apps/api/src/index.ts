@@ -14,6 +14,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 // back only when it matches, so cookies from the X OAuth session can flow.
 const ALLOWED_ORIGINS = new Set([
   "https://bankrwrapped.com",
+  "https://www.bankrwrapped.com",
   "http://localhost:8081", // apps/web (Vite/TanStack Start) dev server - actual observed port, not Vite's default
 ]);
 
@@ -197,6 +198,7 @@ Bun.serve({
 });
 startBackfillSweep("base");
 startRefreshSweep("base");
+
 console.log("[api] listening on http://localhost:" + PORT);
 fetch("https://api.bankr.bot/users/search?query=warmup", { signal: AbortSignal.timeout(25000) })
   .then(() => console.log("[api] warmup fetch done"))
