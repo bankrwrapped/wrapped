@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { T, glass, eyebrow } from "./tokens";
 
-const SKILL_LINK = "https://bankrwrapped.com/skill/bankr-wrapped.json";
+const SKILL_LINK = "https://github.com/bankrwrapped/wrapped/tree/main/skills/bankr-wrapped\n\n> show me my bankr wrapped";
 
 const STEPS = [
   "Go to bankr.bot",
