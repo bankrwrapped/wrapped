@@ -9,7 +9,13 @@
  *
  * This script deletes unresolved (non-Bankr) WatchedPool rows on a schedule
  * so the table doesn't silently refill toward another crash. Run via Railway
- * Cron Schedule - see setup notes at bottom of this file.
+ * Cron Schedule.
+ *
+ * Uses Bun's built-in Postgres client (Bun.SQL / `import { SQL } from "bun"`)
+ * - same client apps/api's wrappedService already uses under the hood
+ * (confirmed via "internal:sql/postgres" stack traces from the earlier
+ * disk-full crashes). No npm "postgres" package is installed in this repo -
+ * an earlier version of this script wrongly assumed it was.
  *
  * Tradeoff (accepted, same as the one-off manual cleanup done 2026-08-21):
  * a pool that was just initialized and hasn't had its first swap yet is
@@ -20,7 +26,7 @@
  * alternative of repeated production crashes.
  */
 
-import postgres from "postgres";
+import { SQL } from "bun";
 
 const CHAINS = [
   { name: "base", url: process.env.BASE_DB_URL },
@@ -33,7 +39,7 @@ async function cleanupChain(name: string, url: string | undefined) {
     return;
   }
 
-  const sql = postgres(url, { ssl: "require" });
+  const sql = new SQL(url, { ssl: "require" });
 
   try {
     const before = await sql`
@@ -60,7 +66,7 @@ async function cleanupChain(name: string, url: string | undefined) {
     console.error(`[cleanup] ${name}: FAILED`, err);
     process.exitCode = 1;
   } finally {
-    await sql.end();
+    await sql.close();
   }
 }
 
@@ -73,20 +79,3 @@ async function main() {
 }
 
 main();
-
-/**
- * ---- Railway Cron Schedule setup -----------------------------------------
- *
- * Set this new service's Root Directory to apps/api (same as the wrapped
- * API service) so it reuses the already-installed `postgres` dependency.
- *
- * Start Command:
- *   bun run scripts/cleanup-watched-pool.ts
- *
- * Cron Schedule (Settings):
- *   0 3 * * 0        (03:00 UTC every Sunday)
- *
- * Variables on this service:
- *   BASE_DB_URL       = Postgres DATABASE_PUBLIC_URL with /base_db at the end
- *   ROBINHOOD_DB_URL  = Postgres DATABASE_PUBLIC_URL with /robinhood_db at the end
- */
