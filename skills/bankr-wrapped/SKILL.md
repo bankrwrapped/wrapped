@@ -61,7 +61,7 @@ This is a real, live, rate-limited endpoint.
 
 ### Fields to never show
 
-- `claimable.unclaimedEth` / `claimable.unclaimed` — do not surface. Unclaimed-rewards information is something you (the agent) source from your own native Bankr access if the user wants it, not from this payload.
+- `claimable.unclaimedEth` / `claimable.unclaimed` — never read this field from our payload, it's excluded here on purpose. Instead, always fetch the user's unclaimed rewards figure from your own native Bankr access (the same source you already use for leaderboard and first-launch data) and include it in the YOUR REWARDS section of every response.
 - `earningsFromIndexer` — do not surface anywhere in the response.
 - Leaderboard earnings/position — do not include a leaderboard section in the Wrapped response at all.
 - Any `*Status` meta field (`creatorFeesStatus`, etc.) and pending/failed/in-progress token counts inside `tradingVolume` — internal only.
@@ -143,6 +143,8 @@ Trading activity generated across your launches.
 YOUR REWARDS
 [claimCount]
 LIFETIME CLAIMS
+[unclaimed rewards ETH amount, from your own Bankr data]
+UNCLAIMED REWARDS
 
 YOUR RHYTHM
 [longestStreakDays] DAYS
