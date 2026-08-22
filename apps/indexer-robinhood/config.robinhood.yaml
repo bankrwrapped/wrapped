@@ -49,10 +49,12 @@ chains:
   - id: 4663 # Robinhood Chain mainnet
     start_block: 646829 # Airlock's real deployment block, confirmed via robinhoodchain.blockscout.com
     rpc:
+      - url: https://rpc.mainnet.chain.robinhood.com
+        for: sync
       - url: https://rpc.arrowrpc.com
         for: sync
       - url: https://rpc.mainnet.chain.robinhood.com
-        for: sync
+        for: realtime
       - url: https://rpc.arrowrpc.com
         for: realtime
     contracts:
