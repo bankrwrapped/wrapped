@@ -2,7 +2,7 @@
 name: bankr-wrapped
 description: Shows a user's Bankr Wrapped — builder type, identity tier, tokens launched, Please Bro tokens, ETH earnings, best day, longest streak, and trading volume. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
 tags: [wrapped, stats, trading, recap]
-version: 3
+version: 4
 visibility: public
 metadata:
   clawdbot:
@@ -17,8 +17,9 @@ metadata:
 This skill only generates a Wrapped for the person actually talking to you in this conversation — never for anyone else.
 
 - The endpoint only accepts an **X/Bankr handle** as the identifier — it does not accept or resolve a wallet address. Calling it with an address (e.g. `/api/wrapped/0xabc...`) will always 404, even for a wallet with real activity, because the backend has no address-to-handle lookup.
-- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), you MUST resolve their X/Bankr handle yourself using your own native identity/session context — never their wallet address, and never by asking the user. Asking the user to provide their handle is only acceptable if you have genuinely exhausted your own ability to resolve it (i.e. you have no session/identity context for this user at all). Do not default to asking as a first response — resolving it yourself is the expected path every time you already know who you're talking to.
-- If the user asks for someone else's Wrapped (a different handle, someone else's @, "show me @someone's wrapped"), refuse. Respond with something like: "I can only pull up your own Bankr Wrapped, not someone else's — ask them to run this themselves." Do not fetch or fabricate data for that handle.
+- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), try to resolve their X/Bankr handle yourself first, using whatever native identity/session context you have access to — never use their wallet address as the identifier. If you can resolve it yourself, do so silently and don't ask.
+- **Ask-once rule:** if you genuinely cannot resolve their handle yourself, ask for it **one time**. Once the user gives it (in this message or a reply), remember it for the rest of this conversation — do not ask again on later requests in the same thread, even if they ask for their Wrapped again later in the conversation.
+- If the user asks for someone else's Wrapped (a different handle, someone else's @, "show me @someone's wrapped"), refuse. Respond with something like: "I can only pull up your own Bankr Wrapped, not someone else's — ask them to run this themselves." Do not fetch or fabricate data for that handle. This refusal does not require resolving your own identity — it only requires recognizing the request explicitly names a different handle than the one you're generating this Wrapped for.
 
 ## Fetching the data
 
@@ -61,10 +62,20 @@ This is a real, live, rate-limited endpoint.
 
 ### Fields to never show
 
-- `claimable.unclaimedEth` / `claimable.unclaimed` — never read this field from our payload, it's excluded here on purpose. Instead, always fetch the user's unclaimed rewards figure from your own native Bankr access (the same source you already use for leaderboard and first-launch data) and include it in the YOUR REWARDS section of every response.
+- `claimable.unclaimedEth` / `claimable.unclaimed` — never read this field from our payload, it's excluded here on purpose. See "Unclaimed rewards" below for how to source this instead.
 - `earningsFromIndexer` — do not surface anywhere in the response.
 - Leaderboard earnings/position — do not include a leaderboard section in the Wrapped response at all.
 - Any `*Status` meta field (`creatorFeesStatus`, etc.) and pending/failed/in-progress token counts inside `tradingVolume` — internal only.
+
+### Unclaimed rewards — source natively, show the full breakdown
+
+Never read unclaimed amounts from our payload. Instead, run your own native unclaimed-fees and leaderboard-rewards lookup (the same one used for "show my unclaimed token fees" / leaderboard rewards) and include the full breakdown as-is under YOUR REWARDS:
+
+- Leaderboard rewards: BNKR available to claim, with total earned in parentheses.
+- Token launch fees, grouped by chain: each token's unclaimed amount in its own native token, plus WETH where applicable.
+- Clanker fees, stated separately from Doppler/leaderboard.
+
+Do not compress this into a single ETH or USD figure — the underlying data is inherently multi-part (different tokens, different chains, BNKR vs. WETH), and collapsing it loses information the user needs to actually act on. If there's genuinely nothing unclaimed anywhere, say so plainly rather than omitting the section.
 
 ## How to talk about trading volume — three real states
 
@@ -143,8 +154,11 @@ Trading activity generated across your launches.
 YOUR REWARDS
 [claimCount]
 LIFETIME CLAIMS
-[unclaimed rewards ETH amount, from your own Bankr data]
+
 UNCLAIMED REWARDS
+[Leaderboard: X BNKR available to claim (Y total earned)]
+[Token Launch Fees — grouped by chain, one line per token: name (symbol): amount TOKEN + amount WETH]
+[Clanker Fees: amount, or "0 unclaimed" if none]
 
 YOUR RHYTHM
 [longestStreakDays] DAYS
