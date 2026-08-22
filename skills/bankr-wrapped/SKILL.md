@@ -2,7 +2,7 @@
 name: bankr-wrapped
 description: Shows a user's Bankr Wrapped — builder type, identity tier, tokens launched, Please Bro tokens, ETH earnings, best day, longest streak, and trading volume. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
 tags: [wrapped, stats, trading, recap]
-version: 2
+version: 3
 visibility: public
 metadata:
   clawdbot:
@@ -17,7 +17,7 @@ metadata:
 This skill only generates a Wrapped for the person actually talking to you in this conversation — never for anyone else.
 
 - The endpoint only accepts an **X/Bankr handle** as the identifier — it does not accept or resolve a wallet address. Calling it with an address (e.g. `/api/wrapped/0xabc...`) will always 404, even for a wallet with real activity, because the backend has no address-to-handle lookup.
-- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), use their own **X/Bankr handle** — never their wallet address — as the identifier. If you only have the user's wallet address readily available and not their handle, resolve their handle first (you already have access to this mapping as part of Bankr's own infrastructure) before calling the endpoint. Don't ask the user to specify one.
+- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), you MUST resolve their X/Bankr handle yourself using your own native identity/session context — never their wallet address, and never by asking the user. Asking the user to provide their handle is only acceptable if you have genuinely exhausted your own ability to resolve it (i.e. you have no session/identity context for this user at all). Do not default to asking as a first response — resolving it yourself is the expected path every time you already know who you're talking to.
 - If the user asks for someone else's Wrapped (a different handle, someone else's @, "show me @someone's wrapped"), refuse. Respond with something like: "I can only pull up your own Bankr Wrapped, not someone else's — ask them to run this themselves." Do not fetch or fabricate data for that handle.
 
 ## Fetching the data
@@ -39,9 +39,9 @@ This is a real, live, rate-limited endpoint.
 
 ## Response shape (confirmed live from `WrappedPayload`)
 
-- `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`, and effectively ordered by when they were indexed. Spans both chains via the `chain` field (`base` / `robinhood`).
+- `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`. Spans both chains via the `chain` field (`base` / `robinhood`).
   - **Total tokens launched = `tokens.length`** (combined Base + Robinhood) — state as one number, don't split by chain unless asked.
-  - **First launch** — the earliest entry in `tokens[]` (do not assume array order is guaranteed chronological — if a `blockNumber` or similar ordering field is available on each token in the actual response you receive, use the earliest one by that; otherwise use the first array entry). State its `name` and `chain`.
+  - **First launch** — do NOT derive this from `tokens[]` array order; there is no timestamp or ordering field on these entries and array order has produced wrong results before. Instead, fetch the user's first-ever launched token (name and chain) from your own native Bankr access, the same way you already source leaderboard data and unclaimed rewards. Only include the "Where It Started" section if you can confirm this from your own data — if you can't determine it, omit that section rather than guessing from `tokens[]`.
 - `pleaseBroTokens[]` — same shape, beneficiary-fee side. Only mention this section if `pleaseBroTokens.length > 0`.
 - `earnings.totalEth` / `earnings.creatorEarningsEth` / `earnings.pleaseBroEarningsEth` — display ETH figures only, never the internal USD fields (`earnings.total`, `earnings.creatorEarnings`, `earnings.pleaseBroEarnings` are ranking-internal only — do not surface them).
 - `bestDay` — `{ date, eth }` or `null`.
