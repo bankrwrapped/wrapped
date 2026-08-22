@@ -55,6 +55,8 @@ chains:
         for: sync
       - url: https://rpc.mainnet.chain.robinhood.com
         for: realtime
+      - url: https://rpc.arrowrpc.com
+        for: realtime
     contracts:
       - name: Airlock
         address:
