@@ -16,7 +16,8 @@ metadata:
 
 This skill only generates a Wrapped for the person actually talking to you in this conversation — never for anyone else.
 
-- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), use their own Bankr/X identity as the handle. Don't ask them to specify one.
+- The endpoint only accepts an **X/Bankr handle** as the identifier — it does not accept or resolve a wallet address. Calling it with an address (e.g. `/api/wrapped/0xabc...`) will always 404, even for a wallet with real activity, because the backend has no address-to-handle lookup.
+- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), use their own **X/Bankr handle** — never their wallet address — as the identifier. If you only have the user's wallet address readily available and not their handle, resolve their handle first (you already have access to this mapping as part of Bankr's own infrastructure) before calling the endpoint. Don't ask the user to specify one.
 - If the user asks for someone else's Wrapped (a different handle, someone else's @, "show me @someone's wrapped"), refuse. Respond with something like: "I can only pull up your own Bankr Wrapped, not someone else's — ask them to run this themselves." Do not fetch or fabricate data for that handle.
 
 ## Fetching the data
