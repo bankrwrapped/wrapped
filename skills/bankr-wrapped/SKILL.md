@@ -1,8 +1,8 @@
 ---
 name: bankr-wrapped
-description: Shows a user's Bankr Wrapped — tokens launched, Please Bro tokens, ETH earnings, unclaimed rewards, best day, longest streak, trading volume, and leaderboard standing. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
+description: Shows a user's Bankr Wrapped — builder type, identity tier, tokens launched, Please Bro tokens, ETH earnings, best day, longest streak, and trading volume. Use when a user asks to see their Bankr Wrapped, their yearly recap, or their trading stats summary.
 tags: [wrapped, stats, trading, recap]
-version: 1
+version: 2
 visibility: public
 metadata:
   clawdbot:
@@ -12,54 +12,151 @@ metadata:
 
 # Bankr Wrapped
 
-When a user asks for their Bankr Wrapped, resolve their handle (strip any leading `@`) and call:
+## Whose Wrapped to generate — read this first
+
+This skill only generates a Wrapped for the person actually talking to you in this conversation — never for anyone else.
+
+- If the user asks for their own Wrapped without specifying a handle ("show me my bankr wrapped"), use their own Bankr/X identity as the handle. Don't ask them to specify one.
+- If the user asks for someone else's Wrapped (a different handle, someone else's @, "show me @someone's wrapped"), refuse. Respond with something like: "I can only pull up your own Bankr Wrapped, not someone else's — ask them to run this themselves." Do not fetch or fabricate data for that handle.
+
+## Fetching the data
+
+Resolve the handle (strip any leading `@`) and call:
 
 ```
 GET https://wrapped-production.up.railway.app/api/wrapped/<handle>
 ```
 
-This is a real, live, rate-limited endpoint — do not retry aggressively on 429; if rate-limited, tell the user to try again shortly rather than hammering the request.
+This is a real, live, rate-limited endpoint.
 
-## Leaderboard data — fetch separately, not from the endpoint above
+### Error handling — three distinct scenarios
 
-The wrapped endpoint above does not and will not return leaderboard earnings or leaderboard position — that data belongs to Bankr's own internal leaderboard system, which this skill has no access to. **You (the agent running this skill) already have access to that leaderboard data natively as part of Bankr's own infrastructure.** When a user asks for their Wrapped, also pull their current leaderboard earnings and leaderboard position from that internal source and include both in your response alongside the wrapped figures below. Do not attempt to derive or estimate these from the wrapped payload — they are a separate data source.
+1. **Backend unreachable / down** (connection error, 5xx response) — do not imply the user has no activity. Say something like: "Bankr Wrapped is temporarily unavailable — try again in a few minutes." Never show a partial or guessed response in this case.
+2. **Request timeout** — say something like: "That took too long to load — Bankr Wrapped might be under load right now. Try again shortly." Do not retry aggressively; a single retry is fine, don't loop.
+3. **`404` — handle not found** — `{ error: "handle not found on Bankr" }`. This means genuinely no Bankr account/activity exists for this handle. Tell the user plainly, don't imply it's a bug.
+4. **Low/no activity user** (`200` response but `summary.hasActivity === false` or `tokens.length === 0` and no earnings) — this is not an error, it's a real state. Don't return an empty-looking response. Say something encouraging and on-brand, e.g.: "Nothing on the board yet — launch a token or trade through Bankr and your Wrapped starts building from there. It's always Bankr szn." Still include their Identity tier if `tradingVolume.totalVolumeUsd` is nonzero even with no launches.
 
 ## Response shape (confirmed live from `WrappedPayload`)
 
-- `404` → `{ error: "handle not found on Bankr" }` — tell the user this handle has no Bankr activity, don't imply it's a bug.
-- `200` → the wrapped payload, including:
-  - `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`. This array already spans both chains — `chain` distinguishes `base` vs `robinhood` per entry. **Total tokens launched = `tokens.length`** (combined Base + Robinhood count) — state this as one number, don't split it by chain unless the user asks.
-  - `pleaseBroTokens[]` — same shape, beneficiary-fee side
-  - `earnings.totalEth` / `earnings.creatorEarningsEth` / `earnings.pleaseBroEarningsEth` — display these ETH figures only, never the internal USD fields (`earnings.total`, `earnings.creatorEarnings`, `earnings.pleaseBroEarnings` are ranking/archetype-internal only — do not surface them)
-  - `claimable.unclaimedEth` — unclaimed rewards, ETH only (same USD-internal rule for `claimable.unclaimed`)
-  - `bestDay` — `{ date, eth }` or `null`
-  - `dailyEarnings[]` — `{ date, eth }` timeline
-  - `claimCount` — lifetime claim count
-  - `longestStreakDays` — longest consecutive-earning-day streak
-  - `earningsFromIndexer` — single combined ETH number (Doppler + Clanker on-chain fees, summed). Treat as one more earnings figure, additive alongside `earnings.totalEth`, not a replacement or component of it.
-  - `tradingVolume` — **always present, real, live.** Shape:
-    ```
-    {
-      totalVolumeUsd: number,
-      status: "pending" | "ok",
-      isComplete: boolean,
-      tokensTotal, tokensComplete, tokensInProgress, tokensPending, tokensFailed: number,
-      updatedAt: string
-    }
-    ```
+- `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`, and effectively ordered by when they were indexed. Spans both chains via the `chain` field (`base` / `robinhood`).
+  - **Total tokens launched = `tokens.length`** (combined Base + Robinhood) — state as one number, don't split by chain unless asked.
+  - **First launch** — the earliest entry in `tokens[]` (do not assume array order is guaranteed chronological — if a `blockNumber` or similar ordering field is available on each token in the actual response you receive, use the earliest one by that; otherwise use the first array entry). State its `name` and `chain`.
+- `pleaseBroTokens[]` — same shape, beneficiary-fee side. Only mention this section if `pleaseBroTokens.length > 0`.
+- `earnings.totalEth` / `earnings.creatorEarningsEth` / `earnings.pleaseBroEarningsEth` — display ETH figures only, never the internal USD fields (`earnings.total`, `earnings.creatorEarnings`, `earnings.pleaseBroEarnings` are ranking-internal only — do not surface them).
+- `bestDay` — `{ date, eth }` or `null`.
+- `claimCount` — lifetime claim count. State this plainly under Rewards.
+- `longestStreakDays` — longest consecutive-earning-day streak.
+- `tradingVolume` — shape:
+  ```
+  {
+    totalVolumeUsd: number,
+    status: "pending" | "ok",
+    isComplete: boolean,
+    tokensTotal, tokensComplete, tokensInProgress, tokensPending, tokensFailed: number,
+    updatedAt: string
+  }
+  ```
+  Note: in some responses this field may arrive as a JSON-encoded string rather than a nested object — if so, parse it before reading its fields.
 
-## How to talk about trading volume — three real states, respond differently for each
+### Fields to never show
 
-1. **`status === "pending"`** — no volume computed yet at all (this is the very first time this wallet's been asked about). Say something like "still crunching your trading volume — ask again in a bit." Don't state a number.
-2. **`status === "ok" && isComplete === true`** — real, final number. State `totalVolumeUsd` plainly as trading volume in USD (volume is never converted to ETH, unlike earnings/claimable).
-3. **`status === "ok" && isComplete === false`** — a real but partial number (some tokens still resolving in the background). State `totalVolumeUsd` but frame it as "at least $X so far, still updating" — don't present it as final.
+- `claimable.unclaimedEth` / `claimable.unclaimed` — do not surface. Unclaimed-rewards information is something you (the agent) source from your own native Bankr access if the user wants it, not from this payload.
+- `earningsFromIndexer` — do not surface anywhere in the response.
+- Leaderboard earnings/position — do not include a leaderboard section in the Wrapped response at all.
+- Any `*Status` meta field (`creatorFeesStatus`, etc.) and pending/failed/in-progress token counts inside `tradingVolume` — internal only.
 
-Never mention `tokensPending`/`tokensFailed`/`tokensInProgress` counts to the user directly — internal detail only, per `getTradingVolumeForBuilder`'s own doc comment ("never surface provider-level detail to the end user"). `isComplete`/`status` exist for the skill's own branching logic above, not for verbatim display.
+## How to talk about trading volume — three real states
 
-## How to respond, general
+1. **`status === "pending"`** — no volume computed yet. Say something like "still crunching your trading volume — ask again in a bit." Don't state a number.
+2. **`status === "ok" && isComplete === true`** — real, final number. State `totalVolumeUsd` plainly in USD (never convert volume to ETH).
+3. **`status === "ok" && isComplete === false`** — real but partial. State `totalVolumeUsd`, framed as "at least $X so far, still updating."
 
-1. Lead with the standout number — biggest single earning day, or total ETH earned, whichever is larger in relative terms.
-2. State total tokens launched (`tokens.length`, combined Base + Robinhood).
-3. Include leaderboard earnings and leaderboard position (fetched separately, per above).
-4. Mention Please Bro tokens only if `pleaseBroTokens.length > 0`.
-5. Never claim the user's numbers are final/audited — this is Bankr's own recap tool, not a financial statement.
+## Archetypes — two separate systems, both included
+
+### Identity — keyed by total trading volume (`tradingVolume.totalVolumeUsd`)
+
+| Volume | Identity | Feeling |
+|---|---|---|
+| $0 – $1K | The Rising Builder | Just getting started |
+| $1K – $10K | The Emerging Builder | Building momentum |
+| $10K – $50K | The Active Builder | Meaningful activity |
+| $50K – $100K | The Momentum Builder | Strong traction |
+| $100K – $500K | The Impact Builder | Significant ecosystem impact |
+| $500K – $1M | The Power Builder | Major activity |
+| $1M – $5M | The Ecosystem Builder | Serious ecosystem contribution |
+| $5M – $10M | The Ecosystem Leader | Exceptional scale |
+| $10M+ | The Ecosystem Pioneer | Extraordinary impact |
+
+### Builder Type — keyed by `tokens.length` (tokens launched)
+
+| Launches | Builder Type | Description |
+|---|---|---|
+| 1 | The Launch Pioneer | First flag planted. Everyone's story starts on this line. |
+| 2–5 | The Repeat Offender | Once wasn't enough. Noted. |
+| 6–10 | The Trench Regular | You know the drill by now. I know your wallet by now too. |
+| 11–20 | The Deploy Machine | Double digits and still going. This is a habit, not a phase. |
+| 21–35 | The Launch Warlord | You've got a whole territory of tokens out here. |
+| 36–50 | The Mint Kingpin | Nobody launches this much by accident. |
+| 51+ | The Final Boss | Top of the leaderboard, top of the food chain. I stopped counting and started taking notes. |
+
+If `tokens.length === 0`, skip Builder Type — there's no launch to categorize (this is the low-activity case, handled above).
+
+## Response format
+
+Structure the response using this layout. Section labels are fixed; the content under each follows the rules above.
+
+```
+BANKR WRAPPED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR BUILDER TYPE
+[Builder Type title, uppercase]
+[Builder Type description]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHERE IT STARTED
+YOUR FIRST LAUNCH
+[token name]
+on [chain, capitalized]
+That's where your Bankr story began.
+
+YOUR STANDOUTS
+CREATOR EARNINGS
+[earnings.creatorEarningsEth] ETH
+BEST EARNING DAY
+[bestDay.eth] ETH
+[bestDay.date]
+
+YOUR ACTIVITY
+[tokens.length]
+TOKENS DEPLOYED
+across Base + Robinhood
+[pleaseBroTokens.length] (only if > 0)
+PLEASE BRO TOKENS
+with beneficiary allocations
+
+YOUR IMPACT
+LAUNCH VOLUME
+$[tradingVolume totalVolumeUsd, formatted]
+Trading activity generated across your launches.
+[+ "Still updating." if isComplete === false]
+
+YOUR REWARDS
+[claimCount]
+LIFETIME CLAIMS
+
+YOUR RHYTHM
+[longestStreakDays] DAYS
+Longest earning streak
+
+IT IS ALWAYS BANKR SZN KEEP BUILDING.
+```
+
+Your Identity tier (from the table above) can be woven in naturally near the top or close of the response — it's a separate axis from Builder Type (volume-based vs. launch-count-based), so don't conflate the two titles.
+
+## Posting to X
+
+If this response is being generated to post as a tweet (not just shown in chat), tag Bankr's own account in the post.
+
+## General rules
+
+- Never claim the user's numbers are final/audited — this is Bankr's own recap tool, not a financial statement.
+- Never fabricate or estimate a number that isn't present in the actual API response.
