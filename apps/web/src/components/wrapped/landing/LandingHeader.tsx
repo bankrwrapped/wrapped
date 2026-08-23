@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useIsMobile } from "./useMediaQuery";
 import { T } from "./tokens";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
@@ -21,6 +22,7 @@ const BUILDERS = [
 ] as const;
 
 export function LandingHeader() {
+  const mobile = useIsMobile();
   const [open, setOpen] = useState<"about" | "built" | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
 
@@ -33,7 +35,9 @@ export function LandingHeader() {
   }, []);
 
   const connect = () => {
-    window.location.assign("/soon");
+    const el = document.getElementById("signin-block");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    else window.location.assign(OAUTH_START_URL);
   };
 
   return (
@@ -42,9 +46,8 @@ export function LandingHeader() {
         <img src="/logo.png" alt="Bankr Wrapped" style={mark} />
         <span style={logoText}>Bankr Wrapped</span>
       </div>
-
       <nav ref={navRef} style={nav}>
-        <Dropdown
+        {!mobile ? <Dropdown
           label="About"
           isOpen={open === "about"}
           onToggle={() => setOpen((o) => (o === "about" ? null : "about"))}
@@ -53,9 +56,9 @@ export function LandingHeader() {
             A year-in-review for everyone who built on Bankr this year. We read the on-chain
             record and hand it back to you — community-built, accuracy over estimation.
           </p>
-        </Dropdown>
+        </Dropdown> : null}
 
-        <Dropdown
+        {!mobile ? <Dropdown
           label="Built by"
           isOpen={open === "built"}
           onToggle={() => setOpen((o) => (o === "built" ? null : "built"))}
@@ -72,7 +75,7 @@ export function LandingHeader() {
               <span style={{ color: T.textFaint }}>@{b.handle}</span>
             </a>
           ))}
-        </Dropdown>
+        </Dropdown> : null}
 
         <button type="button" onClick={connect} style={pillPrimary}>
           Connect X
@@ -117,7 +120,7 @@ const header: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "16px 40px",
+  padding: "14px 18px",
   background: "rgba(12,10,9,0.7)",
   backdropFilter: "blur(12px)",
   WebkitBackdropFilter: "blur(12px)",

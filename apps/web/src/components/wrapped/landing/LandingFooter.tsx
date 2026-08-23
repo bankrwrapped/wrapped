@@ -7,16 +7,18 @@
 // In the WebGL phase the braid unravels and settles into this layout; here
 // it's the flat DOM footer that the braid resolves into.
 
+import { useIsMobile } from "./useMediaQuery";
 import { T } from "./tokens";
 
 export function LandingFooter() {
+  const mobile = useIsMobile();
   return (
     <footer style={footer}>
       <div style={footHero}>
         <p style={motto}>You can copy code. You can't copy community.</p>
       </div>
 
-      <div style={grid}>
+      <div style={{ ...grid, gridTemplateColumns: mobile ? "1fr" : "1.4fr 1fr 1fr 1fr", gap: mobile ? "32px" : "40px" }}>
         <div>
           <div style={brandRow}>
             <img src="/logo.png" alt="Bankr Wrapped" style={brandLogo} />
@@ -28,29 +30,9 @@ export function LandingFooter() {
           </p>
         </div>
 
-        <FootCol
-          title="Product"
-          links={[
-            { label: "Generate", href: "/soon" },
-            { label: "Leaderboard", href: "#" },
-            { label: "The skill", href: "#" },
-          ]}
-        />
-        <FootCol
-          title="Links"
-          links={[
-            { label: "bankr.bot", href: "https://bankr.bot" },
-            {
-              label: "Explorer",
-              href: "https://robinhoodchain.blockscout.com/token/0x00de0f4f3ff55523bec004496bab10cacbfc0ba3",
-            },
-            { label: "GitHub", href: "https://github.com/bankrwrapped" },
-          ]}
-        />
-        <FootCol
-          title="Contact"
-          links={[{ label: "@bankrwrapped", href: "https://x.com/bankrwrapped" }]}
-        />
+        <FootCol title="Product" links={["Generate", "Leaderboard", "The skill"]} />
+        <FootCol title="Links" links={["bankr.bot", "Explorer", "GitHub"]} />
+        <FootCol title="Contact" links={["@bankrwrapped", "Built by the community"]} />
       </div>
 
       <div style={base}>
@@ -61,15 +43,13 @@ export function LandingFooter() {
   );
 }
 
-type FootLink = { label: string; href: string };
-
-function FootCol({ title, links }: { title: string; links: FootLink[] }) {
+function FootCol({ title, links }: { title: string; links: string[] }) {
   return (
     <div>
       <h4 style={colTitle}>{title}</h4>
       {links.map((l) => (
-        <a key={l.href} href={l.href} target="_blank" rel="noreferrer" style={colLink}>
-          {l.label}
+        <a key={l} href="#" style={colLink}>
+          {l}
         </a>
       ))}
     </div>
@@ -81,7 +61,7 @@ const footer: React.CSSProperties = {
   zIndex: 2,
   borderTop: `1px solid ${T.border}`,
   background: "#0a0807",
-  padding: "80px 40px 40px",
+  padding: "64px 20px 40px",
   marginTop: "60px",
   overflow: "hidden",
 };

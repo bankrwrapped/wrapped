@@ -1,20 +1,21 @@
 // apps/web/src/components/wrapped/landing/LandingLeaderboard.tsx
 //
-// Leaderboard teaser — top 5 by earnings, wired to the REAL fetchLeaderboard().
-// Real avatars (proxied), volume bars scaled to the leader, #1 accented
-// orange. Matches the approved mockup. Fails silent (supporting proof, not
-// load-bearing) so a fetch error never blocks the landing.
-//
-// In the WebGL phase these avatars become billboarded sprites orbiting a
-// thick braid segment; here they're the flat DOM teaser.
+// Leaderboard teaser — top 5 by earnings, wired to real fetchLeaderboard().
+// Rows now CASCADE in: each flies up + fades in staggered after the one
+// before, its volume bar filling left-to-right. #1 accented orange. Fails
+// silent (supporting proof). Real avatars used directly (no proxy — display
+// context), with an onError fallback.
 
 import { useEffect, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 
 import { fetchLeaderboard, type LeaderboardEntry } from "@/lib/wrapped-data";
+import { Reveal } from "./Reveal";
 import { T, eyebrow } from "./tokens";
 
 export function LandingLeaderboard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     let cancelled = false;
@@ -23,7 +24,7 @@ export function LandingLeaderboard() {
         if (!cancelled) setEntries(rows.slice(0, 5));
       })
       .catch(() => {
-        /* supporting proof only — silent on failure */
+        /* supporting proof only */
       });
     return () => {
       cancelled = true;
@@ -34,9 +35,11 @@ export function LandingLeaderboard() {
 
   return (
     <section style={block}>
-      <div style={{ ...eyebrow, color: T.violetBright }}>the ledger · refreshed on load</div>
-      <h2 style={h2}>Top of the board, right now.</h2>
-      <p style={lead}>The wallets moving the most through Bankr. Real data, pulled on load.</p>
+      <Reveal from="up">
+        <div style={{ ...eyebrow, color: T.violetBright }}>the ledger · refreshed on load</div>
+        <h2 style={h2}>Top of the board, right now.</h2>
+        <p style={lead}>The wallets moving the most through Bankr. Real data, pulled on load.</p>
+      </Reveal>
 
       {entries.length > 0 ? (
         <div style={board}>
@@ -44,28 +47,40 @@ export function LandingLeaderboard() {
             const pct = Math.round((e.totalEarningsEth / maxVol) * 100);
             const isTop = i === 0;
             return (
-              <div key={e.walletAddress} style={row}>
+              <motion.div
+                key={e.walletAddress}
+                style={row}
+                initial={reduce ? false : { opacity: 0, y: 24 }}
+                whileInView={reduce ? undefined : { opacity: 1, y: 0 }}
+                viewport={{ once: false, amount: 0.4 }}
+                transition={{ duration: 0.5, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+              >
                 <span style={rank}>{String(i + 1).padStart(2, "0")}</span>
                 {e.avatarUrl ? (
-                   <img
-                   src={e.avatarUrl}
-                   alt=""
-                   style={pfp}
-                   onError={(ev) => {
-                     ev.currentTarget.onerror = null;
-                     ev.currentTarget.style.display = "none";
-                     ev.currentTarget.insertAdjacentHTML("afterend", '<span data-avatar-fallback style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2f2440,#160f22);border:1px solid rgba(159,123,255,0.3);display:block"></span>');
+                  <img
+                    src={e.avatarUrl}
+                    alt=""
+                    style={pfp}
+                    onError={(ev) => {
+                      ev.currentTarget.style.visibility = "hidden";
                     }}
                   />
                 ) : (
                   <span style={pfpFallback} aria-hidden />
-                  )}
+                )}
                 <span style={handle}>@{e.username}</span>
                 <span style={{ ...vol, color: isTop ? T.orangeBright : T.violetBright }}>
                   {e.totalEarningsEth.toFixed(1)} ETH
                 </span>
-                <span style={{ ...bar, width: `${pct}%` }} aria-hidden />
-              </div>
+                <motion.span
+                  style={{ ...bar }}
+                  initial={reduce ? false : { width: 0 }}
+                  whileInView={reduce ? undefined : { width: `${pct}%` }}
+                  viewport={{ once: false, amount: 0.4 }}
+                  transition={{ duration: 0.8, delay: i * 0.1 + 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  aria-hidden
+                />
+              </motion.div>
             );
           })}
         </div>

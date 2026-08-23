@@ -7,9 +7,10 @@
 
 import { useState } from "react";
 
+import { useIsMobile } from "./useMediaQuery";
 import { T, glass, eyebrow } from "./tokens";
 
-const SKILL_LINK = "https://github.com/bankrwrapped/wrapped/tree/main/skills/bankr-wrapped\n\n> show me my bankr wrapped";
+const SKILL_LINK = "https://bankrwrapped.com/skill/bankr-wrapped.json";
 
 const STEPS = [
   "Go to bankr.bot",
@@ -24,6 +25,7 @@ const PATHS = [
 ];
 
 export function LandingSkill() {
+  const mobile = useIsMobile();
   const [copied, setCopied] = useState(false);
 
   return (
@@ -31,7 +33,7 @@ export function LandingSkill() {
       <div style={{ ...eyebrow, color: T.violetBright }}>builder · install once</div>
       <h2 style={h2}>Set up the Bankr Wrapped skill.</h2>
 
-      <div style={grid}>
+      <div style={{ ...grid, gridTemplateColumns: mobile ? "1fr" : "1.2fr 0.8fr" }}>
         <div>
           <div style={{ ...glass, padding: "22px 24px" }}>
             <div style={{ ...caLbl, marginBottom: "10px" }}>Skill link</div>
@@ -51,7 +53,7 @@ export function LandingSkill() {
             </div>
           </div>
 
-          <div style={steps}>
+          <div style={{ ...steps, gridTemplateColumns: mobile ? "1fr" : "1fr 1fr" }}>
             {STEPS.map((s, i) => (
               <div key={i} style={{ ...glass, padding: "16px" }}>
                 <div style={stepN}>{String(i + 1).padStart(2, "0")}</div>
