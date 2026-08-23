@@ -1,15 +1,11 @@
 // apps/web/src/components/wrapped/landing/LandingHero.tsx
 //
-// Hero section. Gradient headline + four platform stats as FLOATING numbers
-// (not boxed cards) with an easeOutCubic count-up on load, violet/orange
-// alternating. Matches the approved mockup. Reduced-motion renders final
-// values immediately.
-//
-// Platform figures are platform-wide static/periodic values — not per-user,
-// not fetched. They live here as the hero's content.
+// Hero — gradient headline + four platform stats that SCRAMBLE in (replaying
+// each scroll-in). Mobile: stats stack 2x2 with tighter gaps, smaller type.
 
-import { useEffect, useState } from "react";
-
+import { Reveal } from "./Reveal";
+import { ScrambleNumber } from "./ScrambleNumber";
+import { useIsMobile } from "./useMediaQuery";
 import { T, eyebrow } from "./tokens";
 
 const STATS = [
@@ -20,29 +16,38 @@ const STATS = [
 ] as const;
 
 export function LandingHero() {
-  const values = useCountUp(STATS.map((s) => s.value), STATS.map((s) => s.dec));
+  const mobile = useIsMobile();
 
   return (
-    <section style={hero}>
-      <div style={{ ...eyebrow, color: T.orangeBright }}>
-        <span style={dot} aria-hidden />
-        ecosystem scale
-      </div>
+    <section style={hero(mobile)}>
+      <Reveal from="none">
+        <div style={{ ...eyebrow, color: T.orangeBright, justifyContent: "center" }}>
+          <span style={dot} aria-hidden />
+          ecosystem scale
+        </div>
+      </Reveal>
 
-      <h1 style={h1}>
-        Look how big <em style={em}>Bankr</em> has become.
-      </h1>
+      <Reveal from="up" delay={0.08}>
+        <h1 style={h1(mobile)}>
+          Look how big <em style={em}>Bankr</em> has become.
+        </h1>
+      </Reveal>
 
-      <div style={floatStats}>
+      <div style={floatStats(mobile)}>
         {STATS.map((s, i) => (
-          <div key={s.label} style={fstat}>
-            <div style={s.accent === "orange" ? numOrange : numViolet}>
-              {s.prefix}
-              {values[i]}
-              {s.suffix}
+          <Reveal key={s.label} from="up" delay={0.15 + i * 0.08}>
+            <div style={{ textAlign: "center" }}>
+              <ScrambleNumber
+                prefix={s.prefix}
+                value={s.value}
+                dec={s.dec}
+                suffix={s.suffix}
+                color={s.accent === "orange" ? T.orangeBright : T.violetBright}
+                style={num(mobile)}
+              />
+              <div style={fkey}>{s.label}</div>
             </div>
-            <div style={fkey}>{s.label}</div>
-          </div>
+          </Reveal>
         ))}
       </div>
 
@@ -51,47 +56,17 @@ export function LandingHero() {
   );
 }
 
-function useCountUp(targets: number[], decs: number[]): string[] {
-  const [display, setDisplay] = useState<string[]>(targets.map((_, i) => (0).toFixed(decs[i])));
-
-  useEffect(() => {
-    const reduce =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (reduce) {
-      setDisplay(targets.map((t, i) => t.toFixed(decs[i])));
-      return;
-    }
-
-    const start = performance.now();
-    const dur = 1400;
-    let raf = 0;
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - start) / dur);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setDisplay(targets.map((t, i) => (t * eased).toFixed(decs[i])));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return display;
-}
-
-const hero: React.CSSProperties = {
+const hero = (m: boolean): React.CSSProperties => ({
   minHeight: "100vh",
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
   justifyContent: "center",
   textAlign: "center",
-  padding: "120px 40px 60px",
+  padding: m ? "100px 20px 48px" : "120px 40px 60px",
   position: "relative",
   zIndex: 2,
-};
+});
 
 const dot: React.CSSProperties = {
   width: "5px",
@@ -101,16 +76,16 @@ const dot: React.CSSProperties = {
   boxShadow: `0 0 10px ${T.orange}`,
 };
 
-const h1: React.CSSProperties = {
+const h1 = (m: boolean): React.CSSProperties => ({
   fontFamily: T.fontDisplay,
   fontWeight: 700,
-  fontSize: "clamp(44px, 7vw, 86px)",
+  fontSize: m ? "clamp(34px, 11vw, 52px)" : "clamp(44px, 7vw, 86px)",
   lineHeight: 0.98,
   letterSpacing: "-0.035em",
   margin: "24px auto 0",
   maxWidth: "15ch",
   color: T.text,
-};
+});
 
 const em: React.CSSProperties = {
   fontStyle: "normal",
@@ -120,34 +95,27 @@ const em: React.CSSProperties = {
   WebkitTextFillColor: "transparent",
 };
 
-const floatStats: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
+const floatStats = (m: boolean): React.CSSProperties => ({
+  display: m ? "grid" : "flex",
+  gridTemplateColumns: m ? "1fr 1fr" : undefined,
+  flexWrap: m ? undefined : "wrap",
   justifyContent: "center",
-  gap: "56px",
-  marginTop: "64px",
-};
+  gap: m ? "32px 20px" : "56px",
+  marginTop: m ? "48px" : "64px",
+  width: m ? "100%" : undefined,
+  maxWidth: m ? "420px" : undefined,
+});
 
-const fstat: React.CSSProperties = { textAlign: "center" };
-
-const numBase: React.CSSProperties = {
+const num = (m: boolean): React.CSSProperties => ({
   fontFamily: T.fontDisplay,
   fontWeight: 700,
-  fontSize: "clamp(38px, 5vw, 60px)",
+  fontSize: m ? "clamp(28px, 9vw, 40px)" : "clamp(38px, 5vw, 60px)",
   letterSpacing: "-0.03em",
   lineHeight: 1,
   fontVariantNumeric: "tabular-nums",
-};
-
-const numViolet: React.CSSProperties = {
-  ...numBase,
-  color: T.violetBright,
-};
-
-const numOrange: React.CSSProperties = {
-  ...numBase,
-  color: T.orangeBright,
-};
+  display: "inline-block",
+  textShadow: "0 0 30px rgba(159,123,255,0.25)",
+});
 
 const fkey: React.CSSProperties = {
   fontFamily: T.fontMono,
