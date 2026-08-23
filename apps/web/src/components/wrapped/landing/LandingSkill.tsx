@@ -10,7 +10,7 @@ import { useState } from "react";
 import { useIsMobile } from "./useMediaQuery";
 import { T, glass, eyebrow } from "./tokens";
 
-const SKILL_LINK = "https://bankrwrapped.com/skill/bankr-wrapped.json";
+const SKILL_LINK = "https://github.com/bankrwrapped/wrapped/tree/main/skills/bankr-wrapped";
 
 const STEPS = [
   "Go to bankr.bot",
@@ -23,6 +23,25 @@ const PATHS = [
   { where: "On X", cmd: "@bankrbot show me my Bankr Wrapped" },
   { where: "In Bankr chat", cmd: "show me my Bankr Wrapped" },
 ];
+
+function renderStep(step: string) {
+  if (!step.includes("bankr.bot")) return step;
+  const [before, after] = step.split("bankr.bot");
+  return (
+    <>
+      {before}
+      <a
+        href="https://bankr.bot"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: "inherit", textDecoration: "underline" }}
+      >
+        bankr.bot
+      </a>
+      {after}
+    </>
+  );
+}
 
 export function LandingSkill() {
   const mobile = useIsMobile();
@@ -57,7 +76,7 @@ export function LandingSkill() {
             {STEPS.map((s, i) => (
               <div key={i} style={{ ...glass, padding: "16px" }}>
                 <div style={stepN}>{String(i + 1).padStart(2, "0")}</div>
-                <p style={stepP}>{s}</p>
+                <p style={stepP}>{renderStep(s)}</p>
               </div>
             ))}
           </div>
