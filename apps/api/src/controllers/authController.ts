@@ -3,6 +3,7 @@ import { sessionsRepository } from "../repositories/sessionsRepository";
 import { sessionCrypto } from "../utils/sessionCrypto";
 import { wrappedService } from "../services/wrappedService";
 import { serializeCookie, clearCookie, parseCookies } from "../utils/cookies";
+import { checkWalletResolveRetryLimit } from "../middleware/rateLimit";
 
 const PKCE_COOKIE = "x_oauth_pkce";
 const SESSION_COOKIE = "session";
@@ -19,9 +20,15 @@ const FRONTEND_ROOT = "https://bankrwrapped.com/";
 // localhost as a secure-context exception, but Secure-flagged cookies are
 // still rejected over plain http in some browsers/versions - safest to key
 // this off the actual request protocol rather than assume.
+// Railway terminates TLS at its edge proxy, so the URL Bun sees is plain
+// http:// even for an https visitor - the original scheme only survives in
+// X-Forwarded-Proto (same proxy reasoning as getClientIp in index.ts).
 function isSecureRequest(req: Request): boolean {
+  const forwardedProto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (forwardedProto) return forwardedProto === "https";
   return new URL(req.url).protocol === "https:";
 }
+
 
 export async function startXLogin(req: Request): Promise<Response> {
   const { verifier, challenge } = authService.generatePkce();
@@ -112,6 +119,11 @@ export async function handleXCallback(req: Request): Promise<Response> {
       serializeCookie(SESSION_COOKIE, sessionId, {
         httpOnly: true,
         secure: isSecureRequest(req),
+        // Lax works because the browser never talks to Railway directly: the
+        // frontend worker (apps/web/src/server.ts) proxies /api/* and /auth/*
+        // on bankrwrapped.com, so this is a FIRST-party cookie. Calling the
+        // Railway URL cross-site instead made it third-party - never sent
+        // with Lax, and blocked outright by Safari/iOS even with None.
         sameSite: "Lax",
         path: "/",
         maxAgeSeconds: SESSION_LIFETIME_DAYS * 24 * 60 * 60,
@@ -145,7 +157,9 @@ export async function getMe(req: Request): Promise<Response> {
   // resolution entirely server-side and behind this one endpoint. Only
   // costs an extra Bankr call in this specific stale-null case, not on
   // every /api/auth/me hit.
-  if (evmAddress === null) {
+  // Throttled per session: the comment above assumed this was rare, but a
+  // user with no Bankr account hit Bankr on every page load.
+  if (evmAddress === null && checkWalletResolveRetryLimit(sessionId).allowed) {
     const match = await wrappedService.resolveWallet(session.xUsername);
     if (match) {
       evmAddress = match.evmAddress;

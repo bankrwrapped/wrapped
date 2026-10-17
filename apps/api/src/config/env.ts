@@ -32,7 +32,9 @@ export const env = {
   X_CLIENT_ID: required("X_CLIENT_ID"),
   X_CLIENT_SECRET: required("X_CLIENT_SECRET"),
   // Must exact-match a Callback URL registered in the X Developer Console -
-  // https://wrapped-production.up.railway.app/auth/x/callback in production.
+  // https://bankrwrapped.com/auth/x/callback in production. It goes through
+  // the frontend's same-origin proxy (apps/web/src/server.ts) so the PKCE
+  // and session cookies are first-party on bankrwrapped.com.
   X_REDIRECT_URI: required("X_REDIRECT_URI"),
   // 64-char hex (32 bytes) - generate with `openssl rand -hex 32`. Encrypts
   // refresh tokens at rest in the sessions table (see sessionCrypto.ts).

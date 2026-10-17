@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
+    "typecheck": "tsc --noEmit",
+    "test": "bun --no-env-file run scripts/run-tests.ts",
     "start": "bun run dist/index.js"
   },
   "dependencies": {

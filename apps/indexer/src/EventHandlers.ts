@@ -44,10 +44,7 @@
  *  - StreamableFeesLockerV2.{Collect,Release}  -> IndexedFeeEvent rows, feeds Creator Earnings Breakdown (Module 8)
  *  - Clanker.TokenCreated                      -> KnownToken + WatchedPool rows (Module 4) — no lookup race, tokenAddress known immediately
  *  - ClankerFeeLocker.{StoreTokens,ClaimTokens,ClaimTokensPermissioned} -> IndexedFeeEvent rows (Module 4)
- *
- * MODULE 4 NOTE: ClankerLpLockerFeeConversion is deliberately NOT watched
- * here — it auto-collects LP fees per swap and calls storeFees() on
- * ClankerFeeLocker, which is what emits StoreTokens.
+ *  - ClankerLpLocker.ClaimedRewards            -> attributes that tx's StoreTokens rows to their launched token
  */
 
 import { indexer } from "envio";
@@ -213,6 +210,7 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async 
     tokenAddress: resolved.tokenAddress,
     eventType: "Collect",
     recipient: undefined,
+    launchedToken: resolved.tokenAddress,
     amountToken0: event.params.fees0,
     amountToken1: event.params.fees1,
     blockNumber: BigInt(event.block.number),
@@ -237,7 +235,8 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Release" }, async 
     poolId,
     tokenAddress: resolved.tokenAddress,
     eventType: "Release",
-    recipient: event.params.beneficiary,
+    recipient: normalizeAddress(event.params.beneficiary), // lowercased like every other address here, so the API's recipient filter matches
+    launchedToken: resolved.tokenAddress,
     amountToken0: event.params.fees0,
     amountToken1: event.params.fees1,
     blockNumber: BigInt(event.block.number),
@@ -277,21 +276,34 @@ indexer.onEvent({ contract: "Clanker", event: "TokenCreated" }, async ({ event, 
   });
 });
 
+// Only the Clanker LP lockers deposit LP fees; storeFees() has other
+// allowed depositors whose deposits aren't launch fees.
+const CLANKER_LP_LOCKERS = new Set([
+  "0x29d17c1a8d851d7d4ca97fae97acadb398d9cce0", // ClankerLpLocker
+  "0x63d2dfea64b3433f4071a98665bcd7ca14d93496", // ClankerLpLockerFeeConversion
+]);
+
+// StoreTokens names only the FEE token (usually WETH, sometimes the launched
+// token itself), never which launch earned it - the old KnownToken(token)
+// filter therefore dropped every WETH deposit. The row is written now with
+// launchedToken unset and queued on the tx; ClaimedRewards fills it in.
 indexer.onEvent({ contract: "ClankerFeeLocker", event: "StoreTokens" }, async ({ event, context }) => {
   const chain = chainName(context.chain.id);
+  const sender = normalizeAddress(event.params.sender);
+  if (!CLANKER_LP_LOCKERS.has(sender)) return;
+
   const feeOwner = normalizeAddress(event.params.feeOwner);
   const token = normalizeAddress(event.params.token);
-
-  const known = await context.KnownToken.get(`${chain}:${token}`);
-  if (!known) return; // not one of Bankr's Clanker launches
+  const id = `${chain}:${event.transaction.hash}:${event.logIndex}`;
 
   context.IndexedFeeEvent.set({
-    id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
+    id,
     chain,
     poolId: undefined,
     tokenAddress: token,
     eventType: "StoreTokens",
     recipient: feeOwner,
+    launchedToken: undefined, // set by ClaimedRewards later in this tx
     amountToken0: event.params.amount,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),
@@ -299,6 +311,34 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "StoreTokens" }, async ({
     logIndex: event.logIndex,
     timestamp: new Date(event.block.timestamp * 1000),
   });
+
+  const pendingId = `${chain}:${event.transaction.hash}`;
+  const pending = await context.PendingFeeAttribution.get(pendingId);
+  context.PendingFeeAttribution.set({
+    id: pendingId,
+    eventIds: [...(pending?.eventIds ?? []), id],
+  });
+});
+
+// Closes one _collectRewards(token) call: every StoreTokens queued on this tx
+// since the previous ClaimedRewards was earned on `token`. _collectRewards
+// can't nest (its _inCollect guard returns early), so a tx that collects
+// for several launches emits StoreTokens..ClaimedRewards(A),
+// StoreTokens..ClaimedRewards(B) - each batch is cleared once attributed.
+indexer.onEvent({ contract: "ClankerLpLocker", event: "ClaimedRewards" }, async ({ event, context }) => {
+  const chain = chainName(context.chain.id);
+  const launchedToken = normalizeAddress(event.params.token);
+  const pendingId = `${chain}:${event.transaction.hash}`;
+
+  const pending = await context.PendingFeeAttribution.get(pendingId);
+  if (!pending || pending.eventIds.length === 0) return;
+
+  for (const feeEventId of pending.eventIds) {
+    const feeEvent = await context.IndexedFeeEvent.get(feeEventId);
+    if (!feeEvent) continue;
+    context.IndexedFeeEvent.set({ ...feeEvent, launchedToken });
+  }
+  context.PendingFeeAttribution.set({ id: pendingId, eventIds: [] });
 });
 
 indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({ event, context }) => {
@@ -316,6 +356,7 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({
     tokenAddress: token,
     eventType: "ClaimTokens",
     recipient: feeOwner,
+    launchedToken: undefined, // claims pay out a pooled per-fee-token balance - not attributable to one launch
     amountToken0: event.params.amountClaimed,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),
@@ -341,6 +382,7 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokensPermissioned"
     tokenAddress: token,
     eventType: "ClaimTokensPermissioned",
     recipient, // the actual payout recipient, distinct from feeOwner here
+    launchedToken: undefined, // same as ClaimTokens - not attributable to one launch
     amountToken0: event.params.amountClaimed,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),

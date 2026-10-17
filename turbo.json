@@ -6,12 +6,21 @@
       "persistent": true
     },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "typecheck"],
       "outputs": [".vercel/output/**", "dist/**", ".output/**"],
       "env": ["VITE_API_URL"]
     },
     "lint": {
       "dependsOn": []
+    },
+    "typecheck": {
+      "dependsOn": [],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": [],
+      "cache": false,
+      "passThroughEnv": ["TEST_DATABASE_URL"]
     }
   }
 }

@@ -1,5 +1,5 @@
 import { wrappedService } from "../services/wrappedService";
-import { getBeneficiaryFeesBreakdown } from "../services/module8FeesBreakdown";
+import { bankrTokenKey, getBeneficiaryFeesBreakdown } from "../services/module8FeesBreakdown";
 
 const HANDLE = process.argv[2] ?? "basedkabeer";
 const RUNS = Number(process.argv[3] ?? 4);
@@ -13,9 +13,15 @@ async function main() {
   }
   console.log(`testing wallet=${match.evmAddress} (${HANDLE})`);
 
+  // Same Bankr-launch scope wrappedService uses - see bankrTokenScope there.
+  const payload = await wrappedService.fetchFromBankr(match);
+  const bankrTokens = new Set(
+    [...payload.tokens, ...payload.pleaseBroTokens].map((t) => bankrTokenKey(t.chain, t.tokenAddress))
+  );
+
   for (let i = 1; i <= RUNS; i++) {
     const start = Date.now();
-    const result = await getBeneficiaryFeesBreakdown(match.evmAddress);
+    const result = await getBeneficiaryFeesBreakdown(match.evmAddress, Promise.resolve(bankrTokens));
     const elapsed = Date.now() - start;
     console.log(
       `run ${i}: incomplete=${result.incomplete} reasons=${result.incompleteReasons?.length ?? 0} took=${elapsed}ms`

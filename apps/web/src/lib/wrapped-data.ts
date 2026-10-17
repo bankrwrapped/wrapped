@@ -1,21 +1,18 @@
-export type Chain = "base" | "robinhood";
+// API contract types come straight from packages/shared - the same types the
+// API builds its responses from. This file used to hand-copy them, and the
+// copy had already drifted (no tradingVolume, no earningsFromIndexer).
+import type {
+  Chain,
+  FeesFetchStatus,
+  WrappedCacheRow,
+  WrappedTokenEntry,
+} from "@bankr-wrapped/shared";
 
-export type TokenEntry = {
-  tokenAddress: string;
-  name: string;
-  symbol: string;
-  chain: Chain;
-  // Raw ETH earned on this token - no USD conversion, displayed as-is.
-  feesEarnedEth: number;
-  // Raw source string from Bankr's API ("doppler" | "clanker", loosely
-  // typed to match the backend contract). Not currently rendered anywhere
-  // in the UI - added to keep this type in sync with WrappedTokenEntry per
-  // this file's own "must match" contract, available if a future UI need
-  // wants to show it (e.g. a Doppler/Clanker badge).
-  source: string;
-};
+export type { Chain, FeesFetchStatus };
 
-export type FeesFetchStatus = "ok" | "unavailable";
+// feesEarnedEth is raw ETH, displayed as-is. source ("doppler" | "clanker")
+// isn't rendered yet - available for e.g. a Doppler/Clanker badge.
+export type TokenEntry = WrappedTokenEntry;
 
 export type WrappedProfile = {
   handle: string;
@@ -53,45 +50,18 @@ export class WrappedNotFoundError extends Error {
   }
 }
 
-type ApiWrappedCacheRow = {
-  walletAddress: string;
-  username: string;
-  payload: {
-    user: {
-      handle: string;
-      displayName: string;
-      platform: "x" | "farcaster";
-      avatar: string;
-      wallet: string;
-    };
-    tokens: TokenEntry[];
-    pleaseBroTokens: TokenEntry[];
-    earnings: {
-      creatorEarnings: number;
-      pleaseBroEarnings: number;
-      total: number;
-      creatorEarningsEth: number;
-      pleaseBroEarningsEth: number;
-      totalEth: number;
-    };
-    claimable: { unclaimed: number; unclaimedEth: number };
-    bestDay: { date: string; eth: number } | null;
-    dailyEarnings: { date: string; eth: number }[];
-    claimCount: number;
-    longestStreakDays: number;
-    summary: { tokensLaunched: number; hasActivity: boolean };
-    meta: {
-      creatorFeesStatus: FeesFetchStatus;
-      beneficiaryFeesStatus: FeesFetchStatus;
-    };
-  };
-  updatedAt: string;
-  rank: number;
-  totalUsers: number;
-  percentile: number;
-};
+type ApiWrappedCacheRow = WrappedCacheRow;
 
-const API_URL = import.meta.env.VITE_API_URL ?? "https://wrapped-production.up.railway.app";
+// Single source for the API base - use-auth.ts imports this too. Defaults to
+// "" (same origin): src/server.ts proxies /api/* and /auth/* to the Railway
+// API, which keeps the session cookie first-party - required for Safari/iOS,
+// which block third-party cookies. Only set VITE_API_URL to bypass the proxy
+// (e.g. pointing a dev build straight at a local API).
+export const API_URL = import.meta.env.VITE_API_URL ?? "";
+
+// Starts X OAuth (apps/api authController.startXLogin). Must go through the
+// same origin as API_URL so the PKCE + session cookies land first-party.
+export const X_LOGIN_URL = `${API_URL}/auth/x/login`;
 
 function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
@@ -187,7 +157,9 @@ export const formatEth = (n: number) => {
 // browser's cross-origin canvas-tainting restriction - only needed where
 // a captured image is involved, not for normal display.
 export function proxiedImageUrl(url: string): string {
-  if (url.startsWith(API_URL)) return url;
+  // Already pointing at our proxy (relative or absolute) - don't wrap twice.
+  // (A bare startsWith(API_URL) is always true once API_URL is "".)
+  if (url.includes("/api/image-proxy?")) return url;
   return `${API_URL}/api/image-proxy?url=${encodeURIComponent(url)}`;
 }
 

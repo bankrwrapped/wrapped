@@ -12,6 +12,7 @@ interface IndexedTokenRow {
   backfill_status: BackfillStatus;
   backfill_checkpoint_block: string | null;
   backfill_started_at: Date | null;
+  pricing_attempts: number;
   last_refreshed_at: Date | null;
   decimals: number | null;
 }
@@ -42,6 +43,23 @@ export const indexedTokensRepository = {
     await db`
       update indexed_tokens set backfill_status = ${status}
       where chain = ${chain} and token_address = ${tokenAddress}
+    `;
+  },
+
+  // Returns the attempt number just recorded (1 on the first unpriced run).
+  async incrementPricingAttempts(chain: string, tokenAddress: string): Promise<number> {
+    const [row] = (await db`
+      update indexed_tokens set pricing_attempts = pricing_attempts + 1
+      where chain = ${chain} and token_address = ${tokenAddress}
+      returning pricing_attempts
+    `) as { pricing_attempts: number }[];
+    return row?.pricing_attempts ?? 1;
+  },
+
+  async resetPricingAttempts(chain: string, tokenAddress: string): Promise<void> {
+    await db`
+      update indexed_tokens set pricing_attempts = 0
+      where chain = ${chain} and token_address = ${tokenAddress} and pricing_attempts <> 0
     `;
   },
 

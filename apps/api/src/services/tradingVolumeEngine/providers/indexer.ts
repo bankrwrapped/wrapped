@@ -25,6 +25,40 @@ export async function fetchIndexerVolume(
     return null;
   }
 
+  /*
+   * Record that this wallet is waiting on this token BEFORE anything else,
+   * for every wallet - not just the one that happens to cold-start it.
+   * Previously this only ran in the !existing branch, so a second wallet
+   * holding a token another wallet had already registered (still
+   * backfilling) got no row: its completion summary didn't know about the
+   * token, reported isComplete=true, and its volume froze with the token
+   * excluded - and getWalletsForToken never notified it either.
+   * Idempotent (on conflict do nothing), so repeat asks are cheap.
+   *
+   * Standalone token tests may not provide walletAddress, so those calls
+   * intentionally skip wallet-level tracking.
+   */
+  if (token.walletAddress) {
+    try {
+      await walletBackfillRequestsRepository.recordRequest(
+        token.walletAddress,
+        token.chain,
+        token.address,
+      );
+    } catch (err) {
+      console.error(
+        `[indexerProvider] failed to record backfill request for ` +
+          `${token.walletAddress}/${token.chain}:${token.address}`,
+        err,
+      );
+      /*
+       * Do not start (or report on) the backfill if we failed to establish
+       * the wallet's tracking row.
+       */
+      return null;
+    }
+  }
+
   const existing = await indexedTokensRepository.find(
     token.chain,
     token.address,
@@ -37,33 +71,6 @@ export async function fetchIndexerVolume(
           `(TokenRef.source was missing) -- registering as "unknown". This should be rare; if ` +
           `it's happening regularly, the caller building this TokenRef needs to be fixed, not this provider.`,
       );
-    }
-    /*
-     * Record the wallet's backfill request BEFORE starting the background
-     * backfill. The completion system depends on this row existing.
-     *
-     * Standalone token tests may not provide walletAddress, so those calls
-     * intentionally skip wallet-level tracking.
-     */
-    if (token.walletAddress) {
-      try {
-        await walletBackfillRequestsRepository.recordRequest(
-          token.walletAddress,
-          token.chain,
-          token.address,
-        );
-      } catch (err) {
-        console.error(
-          `[indexerProvider] failed to record backfill request for ` +
-            `${token.walletAddress}/${token.chain}:${token.address}`,
-          err,
-        );
-        /*
-         * Do not start the backfill if we failed to establish the wallet's
-         * tracking row.
-         */
-        return null;
-      }
     }
     /*
      * Start the actual backfill after the wallet request has been recorded.

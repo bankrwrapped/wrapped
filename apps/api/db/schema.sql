@@ -22,10 +22,25 @@ create table if not exists wrapped_profiles (
   unclaimed_eth numeric not null default 0,
   payload jsonb not null,
   first_indexed_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- set once the "your Wrapped is ready" webhook has been sent (public
+  -- tweet - at most once per wallet; see wrappedCacheRepository)
+  ready_notified_at timestamptz
 );
+alter table wrapped_profiles add column if not exists ready_notified_at timestamptz;
+-- One-time repair (safe to re-run - matches nothing once fixed): the old
+-- updateTradingVolume stored payload.tradingVolume as a JSON *string*
+-- instead of an object. Parse those back into objects.
+update wrapped_profiles
+  set payload = jsonb_set(payload, '{tradingVolume}', (payload->>'tradingVolume')::jsonb)
+  where jsonb_typeof(payload->'tradingVolume') = 'string';
 
--- ranking stays USD-based per explicit decision, even though display is ETH
+-- Ranking is by ETH (the displayed figure) with immutable tie-breaks - see
+-- wrappedCacheRepository.getRank. Was USD-based, which mixed each user's
+-- own-fetch-time ETH price into the ordering.
+create index if not exists idx_wrapped_profiles_rank_eth
+  on wrapped_profiles (total_earnings_eth desc, first_indexed_at asc, wallet_address asc);
+-- USD index kept: the USD columns are still written (internal only).
 create index if not exists idx_wrapped_profiles_total_earnings
   on wrapped_profiles (total_earnings_usd desc);
 create index if not exists idx_wrapped_profiles_username
@@ -72,16 +87,37 @@ create table if not exists indexed_tokens (
   token_address              text not null,
   chain                      text not null check (chain in ('base', 'robinhood')),
   pool_id                    text,
-  source                     text not null check (source in ('doppler', 'clanker')),
+  source                     text not null check (source in ('doppler', 'clanker', 'unknown')),
   deployer_wallet            text,
   first_seen_block           bigint,
   decimals                   integer,
   backfill_status            text not null default 'pending'
                                check (backfill_status in ('pending', 'in_progress', 'complete', 'failed')),
   backfill_checkpoint_block  bigint,
+  backfill_started_at        timestamptz,
   last_refreshed_at          timestamptz,
   primary key (chain, token_address)
 );
+
+-- Catch-up for databases created before these columns existed -
+-- `create table if not exists` above is a no-op on an existing table, so
+-- new columns/constraints must also be applied here. Safe to re-run.
+-- decimals: written by decimalsService (Module 8 item 38).
+-- backfill_started_at: read/written by indexedTokensRepository.claimForBackfill.
+alter table indexed_tokens add column if not exists decimals integer;
+alter table indexed_tokens add column if not exists backfill_started_at timestamptz;
+-- Consecutive runs (backfill or refresh) that ended with unpriced swaps.
+-- Those runs are retried instead of dropping the swaps for good; after
+-- MAX_PRICING_ATTEMPTS the gap is accepted and recorded in
+-- token_volume_summary.unpriced_swap_count. Reset on a fully priced run.
+alter table indexed_tokens add column if not exists pricing_attempts integer not null default 0;
+-- 'unknown': the volume engine's cold-start path registers tokens whose
+-- Bankr source is missing/unrecognized as 'unknown'; the old check rejected
+-- that insert, so those tokens' backfill never started and their wallets
+-- never reached "complete".
+alter table indexed_tokens drop constraint if exists indexed_tokens_source_check;
+alter table indexed_tokens add constraint indexed_tokens_source_check
+  check (source in ('doppler', 'clanker', 'unknown'));
 
 -- Pre-aggregated per-token lifetime totals — what Module 7's provider
 -- actually reads. Populated by Module 9's sync job against Envio's
@@ -93,6 +129,22 @@ create table if not exists token_volume_summary (
   swap_count       integer not null default 0,
   last_updated_at  timestamptz not null default now(),
   primary key (chain, token_address)
+);
+-- Swaps excluded from total_volume_usd because no price could be found even
+-- after retries - makes the known gap visible instead of silent.
+alter table token_volume_summary add column if not exists unpriced_swap_count integer not null default 0;
+
+-- Persistent per-token trading-volume cache (tradingVolumeEngine/cache.ts,
+-- via tokenVolumeCacheRepository). Was used in production but never added
+-- here. source is a VolumeSource, or 'not_found' for a negative entry
+-- (volume_usd 0, shorter TTL - see cache.ts).
+create table if not exists token_volume_cache (
+  chain       text not null check (chain in ('base', 'robinhood')),
+  address     text not null,
+  volume_usd  numeric not null default 0,
+  source      text not null,
+  updated_at  timestamptz not null default now(),
+  primary key (chain, address)
 );
 
 

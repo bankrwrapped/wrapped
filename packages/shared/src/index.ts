@@ -93,7 +93,7 @@ export interface BeneficiaryFeesResponse {
   tokens: BeneficiaryFeeTokenEntry[];
 }
 
-// ---- Frontend contract - must match apps/web/src/lib/wrapped-data.ts ----
+// ---- Frontend contract - imported directly by apps/web/src/lib/wrapped-data.ts ----
 
 export interface WrappedTokenEntry {
   tokenAddress: string;
@@ -124,6 +124,10 @@ export interface WrappedTradingVolume {
   tokensPending: number;
   tokensFailed: number;
   updatedAt: string;
+  // Which volume methodology produced this result (see
+  // TRADING_VOLUME_METHOD_VERSION in apps/api wrappedService.ts). Missing on
+  // results stored before versioning existed - treated as 0.
+  methodVersion?: number;
 }
 
 export interface WrappedPayload {

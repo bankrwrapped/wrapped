@@ -6,7 +6,8 @@
   "scripts": {
     "codegen": "envio codegen",
     "dev": "envio dev",
-    "start": "envio start"
+    "start": "envio start",
+    "test": "bun --no-env-file test ./test"
   },
   "dependencies": {
     "envio": "^3.6.0"

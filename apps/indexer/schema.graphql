@@ -74,6 +74,15 @@ type IndexedSwap {
   amountUsd: BigDecimal # left NULL — pricing is Module 5's job, done downstream via Envio's GraphQL API
 }
 
+# StoreTokens rows seen in a tx that haven't been attributed to a launched
+# token yet. ClankerFeeLocker.StoreTokens only names the FEE token (usually
+# WETH); the launch it came from is only known when the LP locker emits
+# ClaimedRewards(token) at the end of the same _collectRewards(token) call.
+type PendingFeeAttribution {
+  id: ID! # `${chain}:${txHash}`
+  eventIds: [String!]! # IndexedFeeEvent ids, in log order, still awaiting ClaimedRewards
+}
+
 type IndexedFeeEvent {
   id: ID! # `${chain}:${txHash}:${logIndex}`
   chain: String!
@@ -81,6 +90,7 @@ type IndexedFeeEvent {
   tokenAddress: String!
   eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned'
   recipient: String # beneficiary (Release), feeOwner (StoreTokens/ClaimTokens), recipient (ClaimTokensPermissioned); null for Collect
+  launchedToken: String # the launch these fees were earned on: the pool's launched token for Doppler, attributed via the LP locker's ClaimedRewards for Clanker StoreTokens; null for Clanker claims (a claim can't be tied to a launch)
   amountToken0: BigInt
   amountToken1: BigInt
   blockNumber: BigInt!

@@ -9,10 +9,10 @@ import { useIsMobile } from "./useMediaQuery";
 import { T, eyebrow } from "./tokens";
 
 const STATS = [
-  { prefix: "$", value: 5, suffix: "B+", label: "ecosystem volume", accent: "violet" },
-  { prefix: "$", value: 20, suffix: "M+", label: "paid to builders", accent: "orange" },
-  { prefix: "", value: 1, suffix: "M+", label: "accounts / wallets", accent: "violet" },
-  { prefix: "", value: 4, suffix: "M+", label: "agent requests", accent: "orange" },
+  { prefix: "$", value: 5, dec: 0, suffix: "B+", label: "ecosystem volume", accent: "violet" },
+  { prefix: "$", value: 20, dec: 0, suffix: "M+", label: "paid to builders", accent: "orange" },
+  { prefix: "", value: 1, dec: 0, suffix: "M+", label: "accounts / wallets", accent: "violet" },
+  { prefix: "", value: 4, dec: 0, suffix: "M+", label: "agent requests", accent: "orange" },
 ] as const;
 
 export function LandingHero() {

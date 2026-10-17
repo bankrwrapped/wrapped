@@ -59,9 +59,12 @@ export default async function handler(req: Request): Promise<Response> {
   // is Bankr's own internal conversation memory, not an X thread/reply id,
   // and no documented mechanism lets an externally-triggered prompt reply
   // into a specific existing tweet.
+  // Links the site root, not bankrwrapped.com/<handle>: no per-handle route
+  // exists on the frontend (that link 404'd). Signing in at the root shows
+  // the user their own Wrapped. Switch back once public share pages ship.
   const prompt =
     `Post a tweet: "@${handle} your Bankr Wrapped is ready — ` +
-    `see your trading recap at bankrwrapped.com/${handle}"`;
+    `sign in at bankrwrapped.com to see your trading recap"`;
 
   return Response.json({ prompt });
 }

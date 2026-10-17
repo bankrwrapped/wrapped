@@ -1,12 +1,13 @@
 import { getLeaderboardController, getWrappedController } from "./controllers/wrappedController";
 import { startXLogin, handleXCallback, getMe } from "./controllers/authController";
-import { checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./middleware/rateLimit";
+import { checkAuthMeRouteLimit, checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./middleware/rateLimit";
 import { wrappedService } from "./services/wrappedService";
 import { startBackfillSweep } from "./services/indexerSync/backfillSweep";
 import { startRefreshSweep } from "./services/indexerSync/refreshSweep";
 
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
+const IMAGE_PROXY_MAX_BYTES = 5 * 1024 * 1024; // avatars are tens of KB; 5MB is generous
 
 // Module 14: was a wildcard origin, which is incompatible with credentialed
 // (cookie-based) requests - browsers reject `Access-Control-Allow-Origin: *`
@@ -95,6 +96,10 @@ Bun.serve({
       return handleXCallback(req);
     }
     if (url.pathname === "/api/auth/me" && req.method === "GET") {
+      const limit = checkAuthMeRouteLimit(getClientIp(req, server));
+      if (!limit.allowed) {
+        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
+      }
       try {
         const res = await getMe(req);
         return withCors(res, req);
@@ -144,9 +149,18 @@ Bun.serve({
         return withCors(Response.json({ error: "host not allowed" }, { status: 400 }), req);
       }
       try {
-        const imgRes = await fetch(parsed.toString(), { signal: AbortSignal.timeout(10000) });
+        // redirect: "manual" - following redirects would let an allowlisted
+        // host bounce this proxy to any other host. Size-capped because the
+        // whole body is buffered in memory.
+        const imgRes = await fetch(parsed.toString(), {
+          signal: AbortSignal.timeout(10000),
+          redirect: "manual",
+        });
         if (!imgRes.ok) throw new Error("upstream fetch failed: " + imgRes.status);
+        const declaredLength = Number(imgRes.headers.get("content-length") ?? 0);
+        if (declaredLength > IMAGE_PROXY_MAX_BYTES) throw new Error("upstream image too large: " + declaredLength);
         const body = await imgRes.arrayBuffer();
+        if (body.byteLength > IMAGE_PROXY_MAX_BYTES) throw new Error("upstream image too large: " + body.byteLength);
         const headers = new Headers();
         headers.set("Content-Type", imgRes.headers.get("content-type") ?? "image/jpeg");
         headers.set("Cache-Control", "public, max-age=86400");
@@ -200,6 +214,10 @@ startBackfillSweep("base");
 startRefreshSweep("base");
 
 console.log("[api] listening on http://localhost:" + PORT);
-fetch("https://api.bankr.bot/users/search?query=warmup", { signal: AbortSignal.timeout(25000) })
-  .then(() => console.log("[api] warmup fetch done"))
-  .catch(() => console.log("[api] warmup fetch failed (non-fatal)"));
+// Skipped under tests (bun test sets NODE_ENV=test): a test run must not
+// call the real Bankr API.
+if (process.env.NODE_ENV !== "test") {
+  fetch("https://api.bankr.bot/users/search?query=warmup", { signal: AbortSignal.timeout(25000) })
+    .then(() => console.log("[api] warmup fetch done"))
+    .catch(() => console.log("[api] warmup fetch failed (non-fatal)"));
+}

@@ -14,11 +14,24 @@ interface ProfileRow {
 // request (see wrappedService.attachRank), never persisted, so this
 // repository never has real values for them and shouldn't claim to.
 export type PersistedWrappedRow = Omit<WrappedCacheRow, "rank" | "totalUsers" | "percentile">;
+// Rows written by the old updateTradingVolume hold tradingVolume as a JSON
+// string (see the note there). schema.sql repairs them in place; this keeps
+// them readable until it has been run.
+function normalizePayload(payload: WrappedPayload): WrappedPayload {
+  const tv = payload.tradingVolume as unknown;
+  if (typeof tv !== "string") return payload;
+  try {
+    return { ...payload, tradingVolume: JSON.parse(tv) };
+  } catch {
+    return payload;
+  }
+}
+
 function toCacheRow(row: ProfileRow): PersistedWrappedRow {
   return {
     walletAddress: row.wallet_address,
     username: row.username,
-    payload: row.payload,
+    payload: normalizePayload(row.payload),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
 }
@@ -75,7 +88,19 @@ export const wrappedCacheRepository = {
           please_bro_earnings_eth = excluded.please_bro_earnings_eth,
           total_earnings_eth = excluded.total_earnings_eth,
           unclaimed_eth = excluded.unclaimed_eth,
-          payload = excluded.payload,
+          -- tradingVolume is owned by updateTradingVolume (background job).
+          -- The incoming payload carries a copy read before this request's
+          -- Bankr fetch; if the job finished in between, writing that copy
+          -- back would erase its result. Keep the row's current value.
+          -- Outer coalesce: jsonb_set returns null if its value arg is null.
+          payload = coalesce(
+            jsonb_set(
+              excluded.payload,
+              '{tradingVolume}',
+              coalesce(wrapped_profiles.payload->'tradingVolume', excluded.payload->'tradingVolume')
+            ),
+            excluded.payload
+          ),
           updated_at = excluded.updated_at
         returning wallet_address, username, payload, updated_at
       `) as ProfileRow[];
@@ -108,8 +133,12 @@ export const wrappedCacheRepository = {
   // Live rank + total user count for a single wallet. Recomputed on every
   // request - never cached alongside payload, since other users being
   // wrapped constantly shifts this. Returns rank 1 = highest earner.
-  // Ranking stays USD-based per explicit decision - a simple, stable metric
-  // for ordering even though displayed figures are ETH.
+  // Ranked by total_earnings_eth - the figure actually displayed. USD was
+  // inconsistent ACROSS users: each row's USD used the ETH price at that
+  // user's own last fetch, so two users with identical ETH earnings could
+  // rank differently. Ties break on first_indexed_at then wallet_address,
+  // both immutable - updated_at changed on every refresh, so a tied user's
+  // rank moved each time they (or anyone tied with them) reloaded.
   async getRank(wallet: string): Promise<{ rank: number; totalUsers: number }> {
     const [totalRow] = (await db`
       select count(*)::int as total from wrapped_profiles
@@ -118,18 +147,12 @@ export const wrappedCacheRepository = {
 
     const [rankRow] = (await db`
       select count(*)::int as higher
-      from wrapped_profiles
-      where total_earnings_usd > (
-        select total_earnings_usd from wrapped_profiles where wallet_address = ${wallet}
-      )
-      or (
-        total_earnings_usd = (
-          select total_earnings_usd from wrapped_profiles where wallet_address = ${wallet}
-        )
-        and updated_at < (
-          select updated_at from wrapped_profiles where wallet_address = ${wallet}
-        )
-      )
+      from wrapped_profiles p, (
+        select total_earnings_eth, first_indexed_at, wallet_address
+        from wrapped_profiles where wallet_address = ${wallet}
+      ) me
+      where (p.total_earnings_eth, me.first_indexed_at, me.wallet_address)
+          > (me.total_earnings_eth, p.first_indexed_at, p.wallet_address)
     `) as Array<{ higher: number }>;
     const rank = (rankRow?.higher ?? 0) + 1;
 
@@ -137,7 +160,7 @@ export const wrappedCacheRepository = {
   },
 
   // Powers the marketing / partnership leaderboard. Wired to GET /api/leaderboard.
-  // Ordering stays USD-based; the ETH columns are what's actually rendered.
+  // Same ordering as getRank (ETH, then immutable tie-breaks).
   async getTopTraders(limit = 20): Promise<TopTraderEntry[]> {
     const rows = (await db`
       select wallet_address, username, display_name, avatar_url,
@@ -145,7 +168,7 @@ export const wrappedCacheRepository = {
              total_earnings_usd, unclaimed_usd,
              total_earnings_eth, unclaimed_eth, updated_at
       from wrapped_profiles
-      order by total_earnings_usd desc
+      order by total_earnings_eth desc, first_indexed_at asc, wallet_address asc
       limit ${limit}
     `) as Array<{
       wallet_address: string;
@@ -182,13 +205,35 @@ export const wrappedCacheRepository = {
   // re-deriving the whole payload and risks clobbering newer data written
   // by a concurrent normal request. This does a narrow, additive patch
   // instead: touches only payload.tradingVolume, nothing else.
+  // "Your Wrapped is ready" is a public tweet, so it must go out at most once
+  // per wallet. Atomic claim: only the caller that flips ready_notified_at
+  // from null gets the username back; everyone else gets null. Release it
+  // if the send fails so a later completion can retry.
+  async claimReadyNotification(wallet: string): Promise<string | null> {
+    const rows = (await db`
+      update wrapped_profiles
+      set ready_notified_at = now()
+      where wallet_address = ${wallet} and ready_notified_at is null
+      returning username
+    `) as Array<{ username: string }>;
+    return rows[0]?.username ?? null;
+  },
+
+  async releaseReadyNotification(wallet: string): Promise<void> {
+    await db`update wrapped_profiles set ready_notified_at = null where wallet_address = ${wallet}`;
+  },
+
   async updateTradingVolume(
     wallet: string,
     tradingVolume: WrappedPayload["tradingVolume"]
   ): Promise<void> {
     await db`
       update wrapped_profiles
-      set payload = jsonb_set(payload, '{tradingVolume}', ${JSON.stringify(tradingVolume)}::jsonb)
+      -- Pass the OBJECT, not JSON.stringify(...): Bun's SQL client binds a
+      -- string as a JSON string, so ::jsonb produced the scalar
+      -- "{\"totalVolumeUsd\":...}" and every background result was stored
+      -- as a string - .status/.isComplete/.updatedAt all read undefined.
+      set payload = jsonb_set(payload, '{tradingVolume}', ${tradingVolume}::jsonb)
       where wallet_address = ${wallet}
     `;
   },
