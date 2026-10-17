@@ -100,6 +100,11 @@ create table if not exists indexed_tokens (
 -- backfill_started_at: read/written by indexedTokensRepository.claimForBackfill.
 alter table indexed_tokens add column if not exists decimals integer;
 alter table indexed_tokens add column if not exists backfill_started_at timestamptz;
+-- Consecutive runs (backfill or refresh) that ended with unpriced swaps.
+-- Those runs are retried instead of dropping the swaps for good; after
+-- MAX_PRICING_ATTEMPTS the gap is accepted and recorded in
+-- token_volume_summary.unpriced_swap_count. Reset on a fully priced run.
+alter table indexed_tokens add column if not exists pricing_attempts integer not null default 0;
 -- 'unknown': the volume engine's cold-start path registers tokens whose
 -- Bankr source is missing/unrecognized as 'unknown'; the old check rejected
 -- that insert, so those tokens' backfill never started and their wallets
@@ -119,6 +124,9 @@ create table if not exists token_volume_summary (
   last_updated_at  timestamptz not null default now(),
   primary key (chain, token_address)
 );
+-- Swaps excluded from total_volume_usd because no price could be found even
+-- after retries - makes the known gap visible instead of silent.
+alter table token_volume_summary add column if not exists unpriced_swap_count integer not null default 0;
 
 -- Persistent per-token trading-volume cache (tradingVolumeEngine/cache.ts,
 -- via tokenVolumeCacheRepository). Was used in production but never added

@@ -124,6 +124,10 @@ export interface WrappedTradingVolume {
   tokensPending: number;
   tokensFailed: number;
   updatedAt: string;
+  // Which volume methodology produced this result (see
+  // TRADING_VOLUME_METHOD_VERSION in apps/api wrappedService.ts). Missing on
+  // results stored before versioning existed - treated as 0.
+  methodVersion?: number;
 }
 
 export interface WrappedPayload {

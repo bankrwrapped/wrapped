@@ -20,6 +20,13 @@ const FETCH_TIMEOUT_MS = 25000; // WSL2 Bun cold-start cost, fine for Railway to
 
 const VOLUME_RECHECK_MS = 15 * 60 * 1000; // 15 minutes
 
+// Bump whenever how trading volume is computed changes, so stored results -
+// including ones marked complete, which are otherwise never recomputed - get
+// recomputed once under the new method.
+//   1: DexScreener (24h volume) dropped from the waterfall; unpriced swaps
+//      are retried instead of being silently excluded for good.
+const TRADING_VOLUME_METHOD_VERSION = 1;
+
 const PENDING_TRADING_VOLUME: WrappedTradingVolume = {
   totalVolumeUsd: 0,
   status: "pending",
@@ -71,6 +78,7 @@ async function computeAndStoreTradingVolume(wallet: string, refs: TokenRef[]): P
     tokensPending: result.tokensPending,
     tokensFailed: result.tokensFailed,
     updatedAt: new Date().toISOString(),
+    methodVersion: TRADING_VOLUME_METHOD_VERSION,
   };
   await wrappedCacheRepository.updateTradingVolume(wallet, tradingVolume);
   return tradingVolume;
@@ -130,6 +138,9 @@ function shouldRefreshTradingVolume(
 ): boolean {
   // No volume result yet: compute it.
   if (!tv || tv.status === "pending") return true;
+
+  // Computed under an older methodology: recompute once, even if complete.
+  if ((tv.methodVersion ?? 0) < TRADING_VOLUME_METHOD_VERSION) return true;
 
   // Complete numbers are authoritative until something explicitly
   // invalidates them. Do not repeatedly recompute them.

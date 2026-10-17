@@ -5,6 +5,7 @@ interface TokenVolumeSummaryRow {
   token_address: string;
   total_volume_usd: string;
   swap_count: number;
+  unpriced_swap_count: number;
   last_updated_at: Date;
 }
 
@@ -23,13 +24,15 @@ export const tokenVolumeSummaryRepository = {
     tokenAddress: string,
     totalVolumeUsd: number,
     swapCount: number,
+    unpricedSwapCount: number,
   ): Promise<void> {
     await db`
-      insert into token_volume_summary (chain, token_address, total_volume_usd, swap_count, last_updated_at)
-      values (${chain}, ${tokenAddress}, ${totalVolumeUsd}, ${swapCount}, now())
+      insert into token_volume_summary (chain, token_address, total_volume_usd, swap_count, unpriced_swap_count, last_updated_at)
+      values (${chain}, ${tokenAddress}, ${totalVolumeUsd}, ${swapCount}, ${unpricedSwapCount}, now())
       on conflict (chain, token_address) do update set
         total_volume_usd = excluded.total_volume_usd,
         swap_count = excluded.swap_count,
+        unpriced_swap_count = excluded.unpriced_swap_count,
         last_updated_at = now()
     `;
   },
@@ -61,6 +64,7 @@ export const tokenVolumeSummaryRepository = {
     tokenAddress: string,
     additionalVolumeUsd: number,
     additionalSwapCount: number,
+    additionalUnpricedSwapCount: number,
     expectedCheckpointBlock: string | null,
     newCheckpointBlock: bigint,
   ): Promise<boolean> {
@@ -75,11 +79,12 @@ export const tokenVolumeSummaryRepository = {
       `) as { token_address: string }[];
       if (advanced.length === 0) return false;
 
-      if (additionalSwapCount > 0) {
+      if (additionalSwapCount > 0 || additionalUnpricedSwapCount > 0) {
         await tx`
           update token_volume_summary
           set total_volume_usd = total_volume_usd + ${additionalVolumeUsd},
               swap_count = swap_count + ${additionalSwapCount},
+              unpriced_swap_count = unpriced_swap_count + ${additionalUnpricedSwapCount},
               last_updated_at = now()
           where chain = ${chain} and token_address = ${tokenAddress}
         `;

@@ -1,6 +1,6 @@
 import { cursorAfterBlock, cursorAfterEvent, fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
 import { getDecimals } from "./decimalsService";
-import { groupSwapsByDay, priceGroupsConcurrently } from "./syncJob";
+import { groupSwapsByDay, MAX_PRICING_ATTEMPTS, priceGroupsConcurrently } from "./syncJob";
 import { indexedTokensRepository } from "../../repositories/indexedTokensRepository";
 import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSummaryRepository";
 
@@ -21,9 +21,8 @@ export async function runScheduledRefresh(chain: string): Promise<void> {
       const cursorStart = expectedCheckpoint ?? "0";
 
       let cursor = cursorAfterBlock(cursorStart);
-      let addedVolumeUsd = 0;
-      let addedSwapCount = 0;
-      let excludedCount = 0;
+      const priced: { block: bigint; volumeUsd: number }[] = [];
+      const unpriced: { block: bigint }[] = [];
       let highestBlockSeen = BigInt(cursorStart);
 
       for (;;) {
@@ -42,18 +41,14 @@ export async function runScheduledRefresh(chain: string): Promise<void> {
 
         for (const [bucketKey, group] of groups) {
           const price = pricesByBucket.get(bucketKey) ?? null;
-          if (price === null) {
-            excludedCount += group.swaps.length;
-            console.warn(
-              `[indexerSync refresh] excluding ${group.swaps.length} unpriced swap(s) ` +
-                `(${chain}:${tokenAddress}, day bucket ${new Date(bucketKey * 1000).toISOString().slice(0, 10)})`,
-            );
-            continue;
-          }
           for (const swap of group.swaps) {
-            const amountTokenWhole = Number(BigInt(swap.amountToken)) / divisor;
-            addedVolumeUsd += amountTokenWhole * price;
-            addedSwapCount += 1;
+            const block = BigInt(swap.blockNumber);
+            if (price === null) {
+              unpriced.push({ block });
+            } else {
+              const amountTokenWhole = Number(BigInt(swap.amountToken)) / divisor;
+              priced.push({ block, volumeUsd: amountTokenWhole * price });
+            }
           }
         }
 
@@ -61,23 +56,59 @@ export async function runScheduledRefresh(chain: string): Promise<void> {
         if (page.length < 1000) break;
       }
 
-      // Checkpoint always advances on ANY new swap seen (priced or not) —
-      // an unpriced swap must never be retried forever on every future run.
-      if (addedSwapCount > 0 || excludedCount > 0) {
+      if (priced.length === 0 && unpriced.length === 0) {
+        continue; // nothing new since the checkpoint
+      }
+
+      // The checkpoint used to advance past unpriced swaps unconditionally,
+      // so a transient pricing failure dropped them forever. Now, while
+      // under MAX_PRICING_ATTEMPTS, commit only swaps in blocks BEFORE the
+      // first unpriced one and leave the checkpoint just before it, so the
+      // next run retries from there. The checkpoint is block-granular, so
+      // the cut is at a block boundary: priced swaps in that block are
+      // re-read next run rather than counted twice.
+      let commitBlock = highestBlockSeen;
+      let acceptedUnpriced = 0;
+      if (unpriced.length > 0) {
+        const attempt = await indexedTokensRepository.incrementPricingAttempts(chain, tokenAddress);
+        const firstUnpricedBlock = unpriced.reduce((min, u) => (u.block < min ? u.block : min), unpriced[0].block);
+        if (attempt < MAX_PRICING_ATTEMPTS) {
+          commitBlock = firstUnpricedBlock - 1n;
+          console.warn(
+            `[indexerSync refresh] ${chain}:${tokenAddress} has ${unpriced.length} unpriced swap(s) from block ` +
+              `${firstUnpricedBlock} - attempt ${attempt}/${MAX_PRICING_ATTEMPTS}, holding the checkpoint there for retry`,
+          );
+        } else {
+          acceptedUnpriced = unpriced.length;
+          console.warn(
+            `[indexerSync refresh] ${chain}:${tokenAddress} still has ${unpriced.length} unpriced swap(s) after ` +
+              `${attempt} attempts - accepting them as excluded`,
+          );
+        }
+      }
+
+      const toCommit = priced.filter((p) => p.block <= commitBlock);
+      const committedBlockMovesForward = commitBlock > BigInt(cursorStart);
+      if (committedBlockMovesForward) {
         const committed = await tokenVolumeSummaryRepository.addToTotalAndAdvanceCheckpoint(
           chain,
           tokenAddress,
-          addedVolumeUsd,
-          addedSwapCount,
+          toCommit.reduce((sum, p) => sum + p.volumeUsd, 0),
+          toCommit.length,
+          acceptedUnpriced,
           expectedCheckpoint,
-          highestBlockSeen,
+          commitBlock,
         );
         if (!committed) {
           console.warn(
             `[indexerSync refresh] ${chain}:${tokenAddress} checkpoint moved during this run ` +
               `(another refresh got there first) - discarding this run's delta`,
           );
+          continue;
         }
+      }
+      if (unpriced.length === 0 || acceptedUnpriced > 0) {
+        await indexedTokensRepository.resetPricingAttempts(chain, tokenAddress);
       }
     } catch (err) {
       // Real infra failure (not an unpriced swap) — leave status/checkpoint

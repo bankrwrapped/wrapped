@@ -77,6 +77,11 @@ export function groupSwapsByDay(swaps: IndexedSwapRow[]): Map<number, PriceGroup
   return groups;
 }
 
+// Runs (backfill or refresh) in a row that may end with unpriced swaps
+// before the gap is accepted. With the sweep's 15-min stale spacing, ~1h+
+// of retrying.
+export const MAX_PRICING_ATTEMPTS = 5;
+
 // NOTE: callers must claim this token via
 // indexedTokensRepository.claimForBackfill() BEFORE calling this function.
 // backfillToken() no longer sets 'in_progress' itself on entry -- that's
@@ -143,15 +148,34 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
       await indexedTokensRepository.updateCheckpoint(chain, tokenAddress, highestBlockSeen);
     }
 
-    await tokenVolumeSummaryRepository.setTotal(chain, tokenAddress, totalVolumeUsd, swapCount);
-    await indexedTokensRepository.updateCheckpoint(chain, tokenAddress, highestBlockSeen);
-
+    // Unpriced swaps used to be dropped and the token marked complete anyway
+    // - so one GoldRush blip (rate limit, timeout, the 90s failure cache)
+    // permanently understated its volume, with no record of what was lost.
+    // Now: leave the token 'pending' for the sweep to retry once it's been
+    // idle for STALE_THRESHOLD_MS (spacing that lets a transient outage
+    // clear; already-priced days come from price_cache, so a retry only
+    // re-fetches the failed days). After MAX_PRICING_ATTEMPTS the gap is
+    // accepted - a genuinely unpriceable day must not block the wallet
+    // forever - and recorded in unpriced_swap_count.
     if (excludedCount > 0) {
-      console.log(
-        `[indexerSync] ${chain}:${tokenAddress} backfill complete with ${excludedCount} unpriced swap(s) ` +
-        `across ${excludedBucketCount} unpriced day-bucket(s) excluded, ${swapCount} priced`,
+      const attempt = await indexedTokensRepository.incrementPricingAttempts(chain, tokenAddress);
+      if (attempt < MAX_PRICING_ATTEMPTS) {
+        console.warn(
+          `[indexerSync] ${chain}:${tokenAddress} backfill has ${excludedCount} unpriced swap(s) across ` +
+          `${excludedBucketCount} day-bucket(s) - attempt ${attempt}/${MAX_PRICING_ATTEMPTS}, leaving pending for retry`,
+        );
+        await indexedTokensRepository.setStatus(chain, tokenAddress, "pending");
+        return;
+      }
+      console.warn(
+        `[indexerSync] ${chain}:${tokenAddress} still has ${excludedCount} unpriced swap(s) across ` +
+        `${excludedBucketCount} day-bucket(s) after ${attempt} attempts - accepting them as excluded, ${swapCount} priced`,
       );
     }
+
+    await tokenVolumeSummaryRepository.setTotal(chain, tokenAddress, totalVolumeUsd, swapCount, excludedCount);
+    await indexedTokensRepository.updateCheckpoint(chain, tokenAddress, highestBlockSeen);
+    await indexedTokensRepository.resetPricingAttempts(chain, tokenAddress);
 
     const chainFullySynced = await isChainFullySynced(chain);
     await indexedTokensRepository.setStatus(

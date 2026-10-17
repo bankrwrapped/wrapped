@@ -87,13 +87,15 @@ precompute → 1–3 → 4, 6.
 
 ## Trading volume
 
-- **[open]** It sums numbers that mean different things: indexer =
+- **[fixed]** It sums numbers that mean different things: indexer =
   lifetime; GeckoTerminal = lifetime of the single top pool; DexScreener =
   last 24h. The first ask always misses the indexer (not backfilled yet), and
   the external result is then cached for 6h.
-- **[open]** Temporary pricing failures become permanent: unpriced swaps are
+  → DexScreener (24h) removed from the waterfall; its cached entries are treated as misses. GeckoTerminal/DexPaprika are both lifetime. Stored results carry `methodVersion`, and older ones (even complete) are recomputed once.
+- **[fixed]** Temporary pricing failures become permanent: unpriced swaps are
   excluded, the token is still marked `complete`, and refresh advances the
   checkpoint past them. Nothing records which swaps were skipped.
+  → Backfill leaves the token `pending` for the sweep to retry (15-min spacing); refresh holds the checkpoint just before the first unpriced swap. After 5 attempts the gap is accepted and recorded in `token_volume_summary.unpriced_swap_count`. Covered by `volumeRetry.test.ts`. Not retroactive: tokens already marked complete keep any past exclusions until re-backfilled.
 - **[partly fixed, uncommitted]** `isComplete` only counts tokens that went through the indexer's
   cold-start path. Cached, external-provider and Robinhood tokens are never
   tracked. A second wallet holding an already-registered token gets no
@@ -203,6 +205,7 @@ precompute → 1–3 → 4, 6.
   migration tool.
   → Adds `token_volume_cache`, `backfill_started_at`, and `alter ... add column if not exists` catch-ups. Still no real migration tool.
 - **[partly fixed]** No type check in any build, no tests (only ad-hoc scripts), no CI.
+  → First real test added (`apps/api`: `bun run test`).
   → `bun run typecheck` (turbo) type-checks api + web, and `build` now depends on it,
   so the Railway deploy fails on type errors. Both pass today. Still no tests, no CI,
   and the indexer isn't covered (it needs `envio codegen` first).
@@ -217,6 +220,7 @@ precompute → 1–3 → 4, 6.
 - **[open]** README drift (`indexer-base/`, `ENVIO_GRAPHQL_URL`). Both READMEs are
   root-owned, so they couldn't be edited here.
 - **[fixed, uncommitted]** `ProviderStopResult` was declared twice.
-- **[open]** Stray `module8FeesBreakdown.ts.bak2/.bak3` files in `apps/api/src/services/`.
+- **[open]** Stray backup files: `module8FeesBreakdown.ts.bak2/.bak3` in `apps/api/src/services/`,
+  `refreshJob.ts.bak` in `apps/api/src/services/indexerSync/`.
 - **[open]** The working tree deletes a large number of tracked
   `.turbo/cache` files; `.turbo/` should be gitignored.

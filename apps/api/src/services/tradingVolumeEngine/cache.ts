@@ -32,6 +32,10 @@ export async function getCached(
 ): Promise<CacheEntry | null> {
   const entry = await tokenVolumeCacheRepository.get(chain, address);
   if (!entry) return null;
+  // DexScreener is no longer a provider (24h volume, not lifetime - see
+  // waterfall.ts). Treat entries it wrote before that as misses so the
+  // wrong number isn't served for up to TTL_MS after deploy.
+  if (entry.source === "dexscreener") return null;
 
   const isNotFound = entry.source === NOT_FOUND_SOURCE;
   const ttl = isNotFound ? NOT_FOUND_TTL_MS : TTL_MS;

@@ -1,7 +1,6 @@
 import { fetchIndexerVolume } from "./providers/indexer";
 import { fetchGeckoTerminalVolume } from "./providers/geckoTerminal";
 import { fetchDexPaprikaVolume } from "./providers/dexPaprika";
-import { fetchDexScreenerVolume } from "./providers/dexScreener";
 import { getCached, setCached, setNotFoundCached } from "./cache";
 import type {
   ProviderStopResult,
@@ -27,12 +26,17 @@ type VolumeProvider = (
 //
 // For tokens that do not exist in our index yet, the normal fallback chain
 // remains available:
-// GeckoTerminal -> DexPaprika -> DexScreener.
+// GeckoTerminal -> DexPaprika.
+//
+// DexScreener was removed as a fallback: it only exposes `volume.h24`
+// (trailing 24h), while every other source is LIFETIME volume. Summing a
+// 24h figure into a lifetime total silently understated tokens by orders
+// of magnitude. A token neither lifetime source has is excluded from the
+// total (not zeroed), same as before - honest gap over a wrong number.
 const PROVIDERS: VolumeProvider[] = [
   fetchIndexerVolume,
   fetchGeckoTerminalVolume,
   fetchDexPaprikaVolume,
-  fetchDexScreenerVolume,
 ];
 
 export async function resolveTokenVolume(
