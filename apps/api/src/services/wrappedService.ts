@@ -21,7 +21,7 @@ import {
   type FeeEntry,
   type QuoteLegValue,
 } from "./bankrFeeValuation";
-import { getClankerClaimableWeth } from "./clankerFeeLocker";
+import { getClankerLedger, type ClankerLedger } from "./clankerLedger";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
@@ -201,6 +201,8 @@ interface IndexerEarningsResult {
   status: "ok" | "unavailable";
   byToken: Record<string, number>;
   incomplete: boolean;
+  // Some Clanker fee events couldn't be attributed or priced.
+  clankerIncomplete: boolean;
 }
 
 async function fetchEarningsFromIndexer(
@@ -254,10 +256,16 @@ async function fetchEarningsFromIndexer(
     // Bankr's own API returning a real but partial result. "unavailable"
     // is reserved for the whole fetch throwing outright (Envio/Postgres
     // down, timeout, etc), same meaning as fetchCreatorFees/fetchBeneficiaryFees.
-    return { data: breakdown.totalEth, status: "ok", byToken: breakdown.byToken, incomplete: breakdown.incomplete };
+    return {
+      data: breakdown.totalEth,
+      status: "ok",
+      byToken: breakdown.byToken,
+      incomplete: breakdown.incomplete,
+      clankerIncomplete: breakdown.bySource.clanker.incomplete,
+    };
   } catch (err) {
     console.log("[wrappedService] fetchEarningsFromIndexer: failed, err=" + String(err));
-    return { data: 0, status: "unavailable", byToken: {}, incomplete: false };
+    return { data: 0, status: "unavailable", byToken: {}, incomplete: false, clankerIncomplete: false };
   }
 }
 
@@ -492,58 +500,79 @@ function dedupeClankerClaims(tokens: FeeEntry[]): boolean[] {
   });
 }
 
-// Wallet-level Clanker claimable WETH, read on-chain - Bankr's figure is
-// bogus (see clankerFeeLocker.ts). Skipped for wallets with no Clanker
-// tokens; a failed read counts as 0 and marks earnings partial.
-async function fetchClankerClaimable(
+// The wallet's Clanker fees, checked against the chain (see clankerLedger.ts).
+// Skipped for wallets with no Clanker tokens. A failed on-chain read counts
+// as 0 claimable and marks earnings partial.
+async function fetchClankerFees(
   wallet: string,
-  entries: FeeEntry[]
-): Promise<{ eth: number; failed: boolean }> {
-  if (!entries.some((t) => t.source === "clanker")) return { eth: 0, failed: false };
+  entries: FeeEntry[],
+  ethUsd: number
+): Promise<{ ledger: ClankerLedger | null; failed: boolean }> {
+  const clankerTokens = entries.filter((t) => t.source === "clanker").map((t) => t.tokenAddress);
+  if (clankerTokens.length === 0) return { ledger: null, failed: false };
   try {
-    return { eth: await getClankerClaimableWeth(wallet), failed: false };
+    return { ledger: await getClankerLedger(wallet, [...new Set(clankerTokens)], ethUsd), failed: false };
   } catch (err) {
-    console.warn("[wrappedService] fetchClankerClaimable: failed, counting 0, err=" + String(err));
-    return { eth: 0, failed: true };
+    console.warn("[wrappedService] fetchClankerFees: failed, counting 0 claimable, err=" + String(err));
+    return { ledger: null, failed: true };
   }
+}
+
+// How one side counts its Clanker tokens. Verified: each launch's lifetime
+// credits from the indexer (claimed + unclaimed, every fee token), once the
+// wallet's ledger reconciles with the chain. Otherwise Bankr's recent claims
+// plus the on-chain unclaimed balance.
+interface ClankerSide {
+  claimableEth: number;
+  earnedByToken: Record<string, number> | null;
 }
 
 interface SideSummary {
   tokens: WrappedTokenEntry[];
-  claimedEth: number;
-  claimableEth: number;
-  // Doppler WETH claims in Bankr's 90-day window - what lifetimeEarnedWeth replaces.
-  dopplerWethClaimedEth: number;
+  // Doppler: quote side, claimed in Bankr's 90-day window / claimable now.
+  dopplerClaimedEth: number;
+  dopplerWethClaimedEth: number; // what lifetimeEarnedWeth replaces
+  dopplerClaimableEth: number;
+  // Clanker: everything earned, unclaimed included.
+  clankerEth: number;
+  clankerClaimableEth: number;
   claimCount: number;
   unpriced: number;
 }
 
-// One side's (creator or Please Bro) fees in ETH. Per token: claimed in the
-// last 90 days + claimable now, quote side only. Clanker tokens count their
-// claims only; the wallet's on-chain Clanker claimable is added to the side
-// total, and to the token itself when it's the side's only Clanker token.
-function summarizeSide(
-  entries: FeeEntry[],
-  legs: QuoteLegValue[],
-  clankerClaimableEth: number
-): SideSummary {
+// One side's (creator or Please Bro) fees in ETH. Per Doppler token: claimed
+// in the last 90 days + claimable now, quote side only. Per Clanker token:
+// lifetime credits when verified; else its claims, plus the wallet's
+// on-chain claimable when it's the side's only Clanker token.
+function summarizeSide(entries: FeeEntry[], legs: QuoteLegValue[], clanker: ClankerSide): SideSummary {
   const keep = dedupeClankerClaims(entries);
   const clankerIdx = entries.flatMap((t, i) => (t.source === "clanker" && keep[i] ? [i] : []));
   const out: SideSummary = {
-    tokens: [], claimedEth: 0, claimableEth: clankerClaimableEth, dopplerWethClaimedEth: 0, claimCount: 0, unpriced: 0,
+    tokens: [], dopplerClaimedEth: 0, dopplerWethClaimedEth: 0, dopplerClaimableEth: 0,
+    clankerEth: clankerIdx.length > 0 && !clanker.earnedByToken ? clanker.claimableEth : 0,
+    clankerClaimableEth: clankerIdx.length > 0 ? clanker.claimableEth : 0,
+    claimCount: 0, unpriced: 0,
   };
   entries.forEach((t, i) => {
     const leg = legs[i];
-    if (!leg.priced) out.unpriced += 1;
     let fees = 0;
     if (keep[i]) {
-      const clanker = t.source === "clanker";
-      const claimable = clanker ? 0 : leg.claimableEth;
-      fees = leg.claimedEth + claimable;
-      if (clanker && clankerIdx.length === 1) fees += clankerClaimableEth;
-      out.claimedEth += leg.claimedEth;
-      out.claimableEth += claimable;
-      if (!clanker && leg.isWethQuote) out.dopplerWethClaimedEth += leg.claimedEth;
+      if (t.source === "clanker") {
+        if (clanker.earnedByToken) {
+          fees = clanker.earnedByToken[bankrTokenKey(t.chain, t.tokenAddress)] ?? 0;
+        } else {
+          if (!leg.priced) out.unpriced += 1;
+          fees = leg.claimedEth + (clankerIdx.length === 1 ? clanker.claimableEth : 0);
+          out.clankerEth += leg.claimedEth;
+        }
+      } else {
+        if (!leg.priced) out.unpriced += 1;
+        fees = leg.claimedEth + leg.claimableEth;
+        out.dopplerClaimedEth += leg.claimedEth;
+        out.dopplerClaimableEth += leg.claimableEth;
+        if (leg.isWethQuote) out.dopplerWethClaimedEth += leg.claimedEth;
+      }
+      if (t.source === "clanker" && clanker.earnedByToken) out.clankerEth += fees;
       out.claimCount += t.claimed?.count ?? 0;
     }
     out.tokens.push({
@@ -657,27 +686,44 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const [creatorLegs, pleaseBroLegs, clanker] = await Promise.all([
     valueQuoteLegs(creator.tokens, learned, ethUsd),
     valueQuoteLegs(beneficiary.tokens, learned, ethUsd),
-    fetchClankerClaimable(match.evmAddress, [...creator.tokens, ...beneficiary.tokens]),
+    fetchClankerFees(match.evmAddress, [...creator.tokens, ...beneficiary.tokens], ethUsd),
   ]);
+
+  // Clanker is verified when the wallet's ledger reconciles with the chain
+  // and every Clanker credit was attributed and priced: then each launch
+  // shows its lifetime credits from the indexer instead of Bankr's 90-day
+  // claims (and Bankr's bogus Clanker claimable).
+  const clankerVerified =
+    clanker.ledger?.check?.reconciled === true &&
+    earningsFromIndexerResult.status === "ok" &&
+    !earningsFromIndexerResult.clankerIncomplete;
+  const clankerClaimableEth = clanker.ledger?.claimableEth ?? 0;
+  const clankerSide: ClankerSide = {
+    claimableEth: clankerClaimableEth,
+    earnedByToken: clankerVerified ? earningsFromIndexerResult.byToken : null,
+  };
   // The locker balance is per wallet: it goes to the creator side when the
   // wallet launched Clanker tokens, else to Please Bro.
   const clankerOnCreator = creator.tokens.some((t) => t.source === "clanker");
-  const c = summarizeSide(creator.tokens, creatorLegs, clankerOnCreator ? clanker.eth : 0);
-  const p = summarizeSide(beneficiary.tokens, pleaseBroLegs, clankerOnCreator ? 0 : clanker.eth);
+  const noClanker: ClankerSide = { claimableEth: 0, earnedByToken: clankerSide.earnedByToken };
+  const c = summarizeSide(creator.tokens, creatorLegs, clankerOnCreator ? clankerSide : noClanker);
+  const p = summarizeSide(beneficiary.tokens, pleaseBroLegs, clankerOnCreator ? noClanker : clankerSide);
   const launchedTokens = c.tokens;
   const pleaseBroTokens = p.tokens;
-  const earningsPartial = c.unpriced + p.unpriced > 0 || clanker.failed;
+  const earningsPartial =
+    c.unpriced + p.unpriced > 0 || clanker.failed || (clanker.ledger?.claimableUnpriced ?? 0) > 0;
 
   // Creator side: Bankr's lifetimeEarnedWeth (lifetime Doppler WETH claims -
   // matches the daily series exactly where they overlap; excludes Clanker)
   // replaces the 90-day Doppler WETH claims. Please Bro has no lifetime
   // field, so it stays 90 days + claimable.
   const lifetimeDopplerWeth = Math.max(parseAmount(creator.lifetimeEarnedWeth), c.dopplerWethClaimedEth);
-  const bankrCreatorEth = lifetimeDopplerWeth + (c.claimedEth - c.dopplerWethClaimedEth) + c.claimableEth;
-  const bankrPleaseBroEth = p.claimedEth + p.claimableEth;
+  const bankrCreatorEth =
+    lifetimeDopplerWeth + (c.dopplerClaimedEth - c.dopplerWethClaimedEth) + c.dopplerClaimableEth + c.clankerEth;
+  const bankrPleaseBroEth = p.dopplerClaimedEth + p.dopplerClaimableEth + p.clankerEth;
   const bankrTotalEth = bankrCreatorEth + bankrPleaseBroEth;
 
-  const indexer =
+  const indexerWithClaimable =
     earningsFromIndexerResult.status === "ok"
       ? await withDopplerClaimable(
           earningsFromIndexerResult,
@@ -688,6 +734,12 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
           ethUsd
         )
       : earningsFromIndexerResult;
+  // A Clanker wallet whose ledger doesn't reconcile with the chain may be
+  // missing Clanker fees, so its indexer number can't be trusted as complete.
+  const indexer =
+    clanker.ledger && !clankerVerified && indexerWithClaimable.status === "ok"
+      ? { ...indexerWithClaimable, incomplete: true }
+      : indexerWithClaimable;
   if (indexer.status === "ok" && bothFeesOkFor(creatorResult, beneficiaryResult)) {
     warnOnEarningsDisagreement(match.evmAddress, bankrTotalEth, indexer.data, indexer.incomplete);
   }
@@ -724,7 +776,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     pleaseBroEarningsEth = p.sum;
   }
   const totalEth = creatorEarningsEth + pleaseBroEarningsEth;
-  const unclaimedEth = c.claimableEth + p.claimableEth;
+  const unclaimedEth = c.dopplerClaimableEth + c.clankerClaimableEth + p.dopplerClaimableEth + p.clankerClaimableEth;
 
   const creatorEarnings = toUsd(creatorEarningsEth);
   const pleaseBroEarnings = toUsd(pleaseBroEarningsEth);
@@ -813,6 +865,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       earningsFromIndexerStatus: earningsFromIndexerResult.status,
       earningsFromIndexerIncomplete: indexer.incomplete,
       earningsPartial,
+      clankerVerified: clanker.ledger ? clankerVerified : undefined,
       earningsSource: useIndexer ? "indexer" : "bankr",
     },
     tradingVolume: PENDING_TRADING_VOLUME,

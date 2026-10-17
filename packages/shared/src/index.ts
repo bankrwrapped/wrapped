@@ -182,6 +182,11 @@ export interface WrappedPayload {
     // Some fees couldn't be valued (a non-WETH quote asset with no price, or
     // the on-chain Clanker read failed) and count as 0: earnings are a floor.
     earningsPartial?: boolean;
+    // Clanker wallets only: true when the indexer's Clanker ledger matched
+    // the fee locker on-chain (credited - claimed = available, per fee token),
+    // so Clanker earnings are the indexer's lifetime figures. false: Bankr's
+    // recent claims + the on-chain unclaimed balance.
+    clankerVerified?: boolean;
   };
   tradingVolume: WrappedTradingVolume;
   // On-chain earnings from the indexer (Doppler Release payouts + Clanker

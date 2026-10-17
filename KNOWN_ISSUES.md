@@ -32,6 +32,31 @@ Checked on the leaderboard's top wallets. Our arithmetic matched Bankr's raw per
 - **One shared rate-limit bucket for the bot (fixed, needs config).** A request with a key from `WRAPPED_TRUSTED_CLIENT_KEYS` in `X-Wrapped-Client-Key` gets a 600/min bucket per key. Key only: an IP allowlist could be spoofed via `X-Forwarded-For`. **Open:** Bankr has to send the header from the bot's runtime.
 - **Open: unpriced quote assets.** A quote asset with no known address and no indexer pool record, or no price, counts as 0 and sets `meta.earningsPartial`. That's mostly Robinhood stock tokens on the Please Bro side when the indexer's pool lookup is unavailable.
 
+## Clanker fees
+
+### v4 (Bankr launches from about August 2025 to February 2026): verified against the chain
+
+- **The check (`clankerLedger.ts`).** ClankerFeeLocker keeps one balance per (fee owner, fee token). So for every fee token, the indexer's *credited* (`StoreTokens`) minus *claimed* (`ClaimTokens*`) must equal `availableFees(wallet, token)` on-chain, read at the indexer's last processed block. When every token matches and every Clanker credit was attributed and priced, `meta.clankerVerified` is true. Each Clanker launch then shows its lifetime credits from the indexer, unclaimed included, in WETH and the launched token. Otherwise the wallet falls back to Bankr's recent claims plus the on-chain unclaimed balance, and its indexer number counts as incomplete.
+- **Unclaimed, launched-token side included.** The on-chain read now covers the wallet's launched tokens as well as WETH, since Clanker can pay fees in both. Balances in a token with no price count as 0 and set `meta.earningsPartial`.
+- **Indexer fix (needs the re-index).** The `ClaimTokens` and `ClaimTokensPermissioned` handlers kept a claim only if its fee token was a `KnownToken`, meaning a launched token. Clanker fees are mostly WETH, so nearly every claim was dropped, and the check could never pass. Claims are now all kept and keyed by the fee owner, the wallet that earned them, including permissioned claims paid to someone else. **Until the re-index, no wallet will verify.**
+- **Coverage confirmed.** Every Clanker v4 contract on Base was deployed after the indexer's start block (fee locker at block 31,526,701, start block 28,415,516), so v4 history is complete.
+- `compare-earnings.ts` prints "clanker verified" or "clanker NOT verified" per wallet.
+
+### v3.1 (Bankr launches from 2025-03-18 to about July 2025): researched, not built
+
+Verified 2026-10-17 from clanker-devco/v3.1-contracts, the Clanker API and on-chain reads:
+- **Bankr launched through Clanker for almost a year.** Bankr's deployer `0x2112b8456AC07c15fA31ddf3Bf713E77716fF3F9` launched 140,541 Clanker tokens. They were v3.1 from 2025-03-18 (factory `0x2A787b…7382`, `LpLockerv2` `0x33e2Eda238edcF470309b8c6D228986A1204c8f9`), then v4 until the last one on 2026-02-10.
+- **How v3.1 fees work.** The pools are Uniswap v3 with a 1% fee. Clanker takes 20%, the creator takes `creatorReward`% (40% on every Bankr launch sampled), and the interface (Bankr; recipient `0xBB251CE08509CD6EeF32Ab4771E9D81522644Be6`) takes the rest. There's no fee locker. Fees sit in the LP position until anyone calls `collectRewards(positionId)`, which pays the recipients directly and emits `ClaimedRewards(lpTokenId, creatorRecipient, interfaceRecipient, …, token0, token1, creatorReward0, creatorReward1, …)`. Uncollected fees can be read with a read-only `collect` call from the locker on Uniswap's NonfungiblePositionManager.
+- **Bankr's API leaves v3.1 out entirely.** Rayblancoeth has 4 v3.1 positions, 0xDeployer 6 and jessepollak 3 (`getLpTokenIdsForCreator`). None appear in Bankr's fee API, so they're missing from our launch scope, launch count and Builder Type, earnings and volume.
+- **Value: not measured yet.** Those 13 positions show 0 WETH claimed and almost nothing uncollected; they're mostly test or dead tokens. Clanker's `creator-earnings` endpoint returns 0 even for Bankr's biggest v3.1 tokens, so it can't be used. Base's public RPC refuses historical log queries, so the full claimed history needs the indexer (HyperSync).
+- **Earlier versions: open.** DRB (2025-03-07) was Clanker v3.0 (`LPLockerv2` `0x5eC4f99F342038c67a312a166Ff56e6D70383D86`) from a different sender. Whether Bankr launched other tokens through v3.0 or v2 isn't confirmed.
+
+Plan, which needs a re-index, so ideally lands before the one that's pending:
+1. Index `LpLockerv2.ClaimedRewards` as earned-fee rows for `creatorRecipient` (`creatorReward0/1`, both tokens), attributed to the launch from `token0`/`token1`.
+2. Build our own v3.1 Bankr scope, since Bankr's API has none: the v3.1 factory's `TokenCreated` with `msgSender` = Bankr's deployer, recording `positionId` and the creator admin.
+3. Read uncollected fees per position (read-only `collect`) times the creator share.
+4. Decide whether v3.1 launches count toward the launch count, Builder Type and volume. That's a product decision.
+
 ## Goal: the indexer as the source of truth
 
 **Unclaimed fees (fixed on this branch):** the indexer counts Doppler `Release`, which fires only when fees are *paid out*, so on its own it missed every unclaimed fee. jessepollak showed 0.00 ETH against 2.07 on Bankr, all of it unclaimed. The indexer number now adds each Doppler pool's claimable fees, both sides like `Release`, from Bankr's per-pool amounts at current prices. Clanker needs nothing extra, because `StoreTokens` accrual already includes unclaimed fees. Anything unpriced marks it incomplete, so the switch falls back to Bankr. Still compare before switching: the claimable part comes from Bankr's data, so the two numbers aren't fully independent.

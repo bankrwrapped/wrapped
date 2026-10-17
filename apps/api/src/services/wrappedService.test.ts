@@ -7,7 +7,11 @@ import "../test/setupEnv";
 import { test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 let capturedScope: Promise<Set<string>> | null = null;
-let indexerBreakdown = { totalEth: 0.25, byToken: {} as Record<string, number>, incomplete: false, incompleteReasons: [] as string[] };
+const breakdown = (totalEth: number, byToken: Record<string, number> = {}, incomplete = false, clankerIncomplete = false) => ({
+  totalEth, byToken, incomplete, incompleteReasons: [] as string[],
+  bySource: { doppler: { incomplete: false }, clanker: { incomplete: clankerIncomplete } },
+});
+let indexerBreakdown = breakdown(0.25);
 mock.module("./module8FeesBreakdown", () => ({
   bankrTokenKey: (chain: string, token: string) => `${chain}:${token.toLowerCase()}`,
   getBeneficiaryFeesBreakdown: async (_addr: string, scope: Promise<Set<string>>) => {
@@ -17,6 +21,15 @@ mock.module("./module8FeesBreakdown", () => ({
   },
 }));
 mock.module("./indexerSync/envioClient", () => ({ fetchWatchedPool: async () => null }));
+// Clanker ledger (tested in clankerLedger.test.ts): what the chain and the
+// indexer say about the wallet's Clanker fees.
+let ledgerCalls = 0;
+let clankerLedger: { claimableEth: number; claimableUnpriced: number; check: { reconciled: boolean } | null } = {
+  claimableEth: 0, claimableUnpriced: 0, check: null,
+};
+mock.module("./clankerLedger", () => ({
+  getClankerLedger: async () => { ledgerCalls += 1; return clankerLedger; },
+}));
 mock.module("./tradingVolumeEngine/getBestAvailableVolume", () => ({ getBestAvailableVolume: async () => ({}) }));
 mock.module("../utils/bankrRateLimiter", () => ({
   bankrRateLimiter: { beforeSearch: async () => {}, beforeFeesCall: async () => {} },
@@ -36,8 +49,6 @@ let creatorTokens: any[] = [];
 let beneficiaryTokens: any[] = [];
 let creatorExtra: Record<string, unknown> = {};
 let geckoPrices: Record<string, string> = {};
-let clankerWei = 0n;
-let rpcCalls = 0;
 let searchCalls = 0;
 let searchStatus = 200;
 let creatorStatus = 200;
@@ -63,10 +74,6 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const token_prices = Object.fromEntries(asked.filter((a) => a in geckoPrices).map((a) => [a, geckoPrices[a]]));
     return Response.json({ data: { attributes: { token_prices } } });
   }
-  if (url === "http://base-rpc.test") {
-    rpcCalls += 1;
-    return Response.json({ jsonrpc: "2.0", id: 1, result: "0x" + clankerWei.toString(16).padStart(64, "0") });
-  }
   throw new Error("unexpected fetch " + url);
 }) as typeof fetch;
 afterAll(() => { globalThis.fetch = realFetch; });
@@ -75,13 +82,13 @@ const { shouldRefreshTradingVolume, mergeWithCache, wrappedService } = await imp
 const { clearCurrentPriceCache } = await import("./currentPrices");
 
 beforeEach(() => {
-  searchCalls = 0; searchStatus = 200; creatorStatus = 200; capturedScope = null; rpcCalls = 0;
-  indexerBreakdown = { totalEth: 0.25, byToken: {}, incomplete: false, incompleteReasons: [] };
+  searchCalls = 0; searchStatus = 200; creatorStatus = 200; capturedScope = null; ledgerCalls = 0;
+  indexerBreakdown = breakdown(0.25);
+  clankerLedger = { claimableEth: 0, claimableUnpriced: 0, check: null };
   creatorTokens = [entry({ claimable: { token0: "0.05", token1: "0" }, claimed: { token0: "0.05", token1: "0", count: 1 } })];
   beneficiaryTokens = [entry({ tokenAddress: "0xBBB", name: "B", symbol: "B", chain: "robinhood", token1Label: "B" })];
   creatorExtra = {};
   geckoPrices = {};
-  clankerWei = 0n;
   clearCurrentPriceCache();
   delete process.env.EARNINGS_SOURCE;
 });
@@ -147,24 +154,49 @@ test("a Please Bro entry's quote asset resolves from its label; an unpriced one 
   expect(p.meta.earningsPartial).toBe(true);
 });
 
-test("Bankr's Clanker claimable is ignored; the on-chain locker balance is used once per wallet", async () => {
-  const clank = (addr: string, claimed = "0") => entry({
-    tokenAddress: addr, symbol: "K", source: "clanker", token0Label: "WETH", token1Label: "K",
-    claimable: { token0: "0.067726", token1: "0" }, claimed: { token0: claimed, token1: "0", count: claimed === "0" ? 0 : 1 },
-  });
+const clank = (addr: string, claimed = "0") => entry({
+  tokenAddress: addr, symbol: "K", source: "clanker", token0Label: "WETH", token1Label: "K",
+  claimable: { token0: "0.067726", token1: "0" }, claimed: { token0: claimed, token1: "0", count: claimed === "0" ? 0 : 1 },
+});
+
+test("Clanker, not verified: Bankr's claimable is ignored; recent claims + on-chain unclaimed, once per wallet", async () => {
   creatorTokens = [clank("0xK1", "0.01"), clank("0xK2", "0.01"), clank("0xK3")];
-  clankerWei = 3n * 10n ** 15n; // 0.003 WETH really claimable
+  clankerLedger = { claimableEth: 0.003, claimableUnpriced: 0, check: { reconciled: false } };
   const p = await wrappedService.fetchFromBankr(match);
-  expect(rpcCalls).toBe(1);
+  expect(ledgerCalls).toBe(1);
   // 0.01 claimed (the second identical claim is a duplicate) + 0.003 on-chain.
   expect(p.earnings.creatorEarningsEth).toBeCloseTo(0.013, 10);
   expect(p.claimable.unclaimedEth).toBeCloseTo(0.003, 10);
   expect(p.tokens.map((t) => t.feesEarnedEth)).toEqual([0.01, 0, 0]); // several Clanker tokens: the balance isn't attributed
+  expect(p.meta.clankerVerified).toBe(false);
+  expect(p.meta.earningsFromIndexerIncomplete).toBe(true); // can't trust the indexer's Clanker part either
 });
 
-test("no Clanker tokens -> no on-chain read", async () => {
-  await wrappedService.fetchFromBankr(match);
-  expect(rpcCalls).toBe(0);
+test("Clanker, verified: each launch shows its lifetime credits from the indexer (unclaimed included)", async () => {
+  creatorTokens = [clank("0xK1", "0.01"), clank("0xK2")];
+  indexerBreakdown = breakdown(0.5, { "base:0xk1": 0.4, "base:0xk2": 0.1 });
+  clankerLedger = { claimableEth: 0.05, claimableUnpriced: 0, check: { reconciled: true } };
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(p.meta.clankerVerified).toBe(true);
+  expect(p.tokens.map((t) => t.feesEarnedEth)).toEqual([0.4, 0.1]);
+  expect(p.earnings.creatorEarningsEth).toBeCloseTo(0.5, 10); // not 0.5 + 0.05: credits already include unclaimed
+  expect(p.claimable.unclaimedEth).toBeCloseTo(0.05, 10);
+  expect(p.meta.earningsFromIndexerIncomplete).toBe(false);
+});
+
+test("Clanker: reconciled but some credits unattributed -> not verified", async () => {
+  creatorTokens = [clank("0xK1", "0.01")];
+  indexerBreakdown = breakdown(0.4, { "base:0xk1": 0.4 }, true, true);
+  clankerLedger = { claimableEth: 0.05, claimableUnpriced: 0, check: { reconciled: true } };
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(p.meta.clankerVerified).toBe(false);
+  expect(p.earnings.creatorEarningsEth).toBeCloseTo(0.06, 10); // fallback: claim + on-chain unclaimed
+});
+
+test("no Clanker tokens -> no Clanker ledger read", async () => {
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(ledgerCalls).toBe(0);
+  expect(p.meta.clankerVerified).toBeUndefined();
 });
 
 test("creator total uses lifetime Doppler WETH claims; best day uses the lifetime best", async () => {
@@ -203,7 +235,7 @@ test("indexer earnings are scoped to the wallet's Bankr tokens (creator + Please
 test("indexer number adds Doppler claimable on BOTH sides, at current prices", async () => {
   creatorTokens = [entry({ claimable: { token0: "0.05", token1: "1000" } })];
   geckoPrices = { "0xaaa": "0.2" }; // 1000 A = $200 = 0.1 ETH
-  indexerBreakdown = { totalEth: 0.25, byToken: { "base:0xaaa": 0.25 }, incomplete: false, incompleteReasons: [] };
+  indexerBreakdown = breakdown(0.25, { "base:0xaaa": 0.25 });
   const p = await wrappedService.fetchFromBankr(match);
   expect(p.earningsFromIndexer).toBeCloseTo(0.4, 10);
   expect(p.meta.earningsFromIndexerIncomplete).toBe(false);
@@ -225,7 +257,7 @@ test("Bankr fees unavailable -> indexer earnings reported unavailable, not unsco
 // Indexer payouts per token; the 0.05 still claimable on 0xAAA is added on top.
 const indexerSays = (byToken: Record<string, number>, incomplete = false) => {
   const totalEth = Object.values(byToken).reduce((a, b) => a + b, 0);
-  indexerBreakdown = { totalEth, byToken, incomplete, incompleteReasons: [] };
+  indexerBreakdown = breakdown(totalEth, byToken, incomplete);
 };
 
 test("switch off: earnings stay Bankr's, both totals are kept", async () => {

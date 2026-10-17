@@ -17,7 +17,12 @@ const TIMEOUT_MS = 10_000;
 
 const word = (address: string) => address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 
-export async function getClankerClaimableWeth(wallet: string): Promise<number> {
+export const CLANKER_FEE_TOKEN_WETH = BASE_WETH;
+
+// availableFees(wallet, token) in the token's raw units, at `block` (a block
+// number) or the latest block.
+export async function getAvailableFees(wallet: string, token: string, block?: bigint): Promise<bigint> {
+  const blockTag = block === undefined ? "latest" : "0x" + block.toString(16);
   const res = await fetch(env.BASE_RPC_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -25,7 +30,7 @@ export async function getClankerClaimableWeth(wallet: string): Promise<number> {
       jsonrpc: "2.0",
       id: 1,
       method: "eth_call",
-      params: [{ to: CLANKER_FEE_LOCKER, data: AVAILABLE_FEES_SELECTOR + word(wallet) + word(BASE_WETH) }, "latest"],
+      params: [{ to: CLANKER_FEE_LOCKER, data: AVAILABLE_FEES_SELECTOR + word(wallet) + word(token) }, blockTag],
     }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -33,5 +38,9 @@ export async function getClankerClaimableWeth(wallet: string): Promise<number> {
   const json = (await res.json()) as { result?: string; error?: { message: string } };
   if (json.error) throw new Error(`availableFees RPC error: ${json.error.message}`);
   if (!json.result || json.result === "0x") throw new Error("availableFees returned no result");
-  return Number(BigInt(json.result)) / 1e18;
+  return BigInt(json.result);
+}
+
+export async function getClankerClaimableWeth(wallet: string): Promise<number> {
+  return Number(await getAvailableFees(wallet, BASE_WETH)) / 1e18;
 }
