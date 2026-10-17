@@ -83,6 +83,17 @@ export const indexedTokensRepository = {
     `;
   },
 
+  async countByStatus(chain: string): Promise<Record<BackfillStatus, number>> {
+    const rows = (await db`
+      select backfill_status, count(*)::int as count from indexed_tokens
+      where chain = ${chain}
+      group by backfill_status
+    `) as { backfill_status: BackfillStatus; count: number }[];
+    const out: Record<BackfillStatus, number> = { pending: 0, in_progress: 0, complete: 0, failed: 0 };
+    for (const r of rows) out[r.backfill_status] = r.count;
+    return out;
+  },
+
   async listCompleteForRefresh(chain: string): Promise<IndexedTokenRow[]> {
     return (await db`
       select * from indexed_tokens

@@ -64,6 +64,9 @@ export const checkAuthMeRouteLimit = createRateLimiter(60_000, 30);
 // /api/auth/me call.
 export const checkWalletResolveRetryLimit = createRateLimiter(5 * 60_000, 1);
 
+// /api/status is cached for 30s, so this only stops someone hammering it.
+export const checkStatusRouteLimit = createRateLimiter(60_000, 30);
+
 // More permissive - this route backs live typeahead-as-you-type, so a
 // single user typing one handle can easily fire 5-10 requests.
 export const checkSearchSuggestRouteLimit = createRateLimiter(60_000, 60);

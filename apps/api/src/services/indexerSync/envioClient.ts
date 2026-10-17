@@ -395,6 +395,45 @@ export async function fetchClankerV31ClaimsPage(
   return data[FEE_EVENT_ROOT_FIELD];
 }
 
+// How far the indexer has got on a chain, from Envio's own chain_metadata
+// (block_height is Envio's view of the chain head). For /api/status.
+export interface ChainProgress {
+  startBlock: number;
+  processedBlock: number | null;
+  headBlock: number | null;
+  caughtUpAt: string | null;
+}
+
+export async function fetchChainProgress(chain: string): Promise<ChainProgress | null> {
+  const chainId = CHAIN_ID_MAP[chain];
+  if (chainId === undefined) {
+    throw new Error(`fetchChainProgress: unsupported chain=${chain}`);
+  }
+  const query = `
+    query ChainProgress($chainId: Int!) {
+      ${CHAIN_METADATA_ROOT_FIELD}(where: { chain_id: { _eq: $chainId } }) {
+        start_block latest_processed_block block_height timestamp_caught_up_to_head_or_endblock
+      }
+    }
+  `;
+  type Row = {
+    start_block: number | string;
+    latest_processed_block: number | string | null;
+    block_height: number | string | null;
+    timestamp_caught_up_to_head_or_endblock: string | null;
+  };
+  const data = await envioQuery<Record<string, Row[]>>(chain, query, { chainId });
+  const row = data[CHAIN_METADATA_ROOT_FIELD][0];
+  if (!row) return null;
+  const num = (v: number | string | null) => (v === null || v === undefined ? null : Number(v));
+  return {
+    startBlock: Number(row.start_block),
+    processedBlock: num(row.latest_processed_block),
+    headBlock: num(row.block_height),
+    caughtUpAt: row.timestamp_caught_up_to_head_or_endblock,
+  };
+}
+
 // The last block the indexer has fully processed - an on-chain read at this
 // block sees exactly the state its events describe.
 export async function fetchLatestProcessedBlock(chain: string): Promise<bigint | null> {

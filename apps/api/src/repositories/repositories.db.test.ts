@@ -226,6 +226,15 @@ describe.skipIf(!ADMIN_URL)("repositories (real Postgres)", () => {
     expect(order.indexOf("0xtieold")).toBeLessThan(order.indexOf("0xtienew"));
   });
 
+  test("countByStatus counts every backfill status, zeros included", async () => {
+    await raw`delete from indexed_tokens`;
+    await repos.tokens.createPending("base", "0xc1", "doppler");
+    await repos.tokens.createPending("base", "0xc2", "doppler");
+    await repos.tokens.setStatus("base", "0xc2", "complete");
+    await repos.tokens.createPending("robinhood", "0xc3", "doppler");
+    expect(await repos.tokens.countByStatus("base")).toEqual({ pending: 1, in_progress: 0, complete: 1, failed: 0 });
+  });
+
   test("listStale returns only profiles older than the cutoff, stalest first", async () => {
     await raw`delete from wrapped_profiles`;
     for (const w of ["0xold", "0xolder", "0xfresh"]) await repos.wrapped.upsert(w, w.slice(2), payload(w, 1, 1, 0));
