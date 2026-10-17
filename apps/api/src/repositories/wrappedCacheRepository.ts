@@ -159,6 +159,18 @@ export const wrappedCacheRepository = {
     return { rank, totalUsers };
   },
 
+  // Profiles not refreshed since `olderThan`, stalest first - for the
+  // leaderboard refresh (services/leaderboardRefresh.ts).
+  async listStale(olderThan: Date, limit: number): Promise<Array<{ username: string; updatedAt: string }>> {
+    const rows = (await db`
+      select username, updated_at from wrapped_profiles
+      where updated_at < ${olderThan}
+      order by updated_at asc, wallet_address asc
+      limit ${limit}
+    `) as Array<{ username: string; updated_at: string }>;
+    return rows.map((r) => ({ username: r.username, updatedAt: new Date(r.updated_at).toISOString() }));
+  },
+
   // Powers the marketing / partnership leaderboard. Wired to GET /api/leaderboard.
   // Same ordering as getRank (ETH, then immutable tie-breaks).
   async getTopTraders(limit = 20): Promise<TopTraderEntry[]> {

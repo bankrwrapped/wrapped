@@ -1,9 +1,16 @@
 import { getLeaderboardController, getWrappedController } from "./controllers/wrappedController";
 import { startXLogin, handleXCallback, getMe } from "./controllers/authController";
-import { checkAuthMeRouteLimit, checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./middleware/rateLimit";
+import {
+  checkAuthMeRouteLimit,
+  checkSearchSuggestRouteLimit,
+  checkTrustedWrappedRouteLimit,
+  checkWrappedRouteLimit,
+} from "./middleware/rateLimit";
+import { trustedClientId } from "./middleware/trustedClients";
 import { wrappedService } from "./services/wrappedService";
 import { startBackfillSweep } from "./services/indexerSync/backfillSweep";
 import { startRefreshSweep } from "./services/indexerSync/refreshSweep";
+import { startLeaderboardRefresh } from "./services/leaderboardRefresh";
 
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -187,8 +194,10 @@ Bun.serve({
     const wrappedMatch = url.pathname.match(/^\/api\/wrapped\/([^/]+)$/);
     if (wrappedMatch && req.method === "GET") {
       const clientIp = getClientIp(req, server);
-      const limit = checkWrappedRouteLimit(clientIp);
+      const trusted = trustedClientId(req);
+      const limit = trusted ? checkTrustedWrappedRouteLimit(trusted) : checkWrappedRouteLimit(clientIp);
       if (!limit.allowed) {
+        console.warn(`[api] 429 /api/wrapped ip=${clientIp}` + (trusted ? ` client=${trusted}` : ""));
         return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
       try {
@@ -212,6 +221,7 @@ Bun.serve({
 });
 startBackfillSweep("base");
 startRefreshSweep("base");
+startLeaderboardRefresh();
 
 console.log("[api] listening on http://localhost:" + PORT);
 // Skipped under tests (bun test sets NODE_ENV=test): a test run must not
