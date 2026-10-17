@@ -100,6 +100,9 @@ export interface WrappedTokenEntry {
   name: string;
   symbol: string;
   chain: Chain;
+  // Bankr-sourced: claimed in the last 90 days + claimable now, quote side
+  // (WETH, BNKR, stock...) in ETH. The creator total also counts lifetime
+  // Doppler WETH claims, so per-token figures can sum to less than it.
   feesEarnedEth: number;
   source: string;
 }
@@ -176,10 +179,14 @@ export interface WrappedPayload {
     // best day, streak and claim count always come from Bankr. Missing on
     // payloads cached before it existed - those are Bankr.
     earningsSource?: "bankr" | "indexer";
+    // Some fees couldn't be valued (a non-WETH quote asset with no price, or
+    // the on-chain Clanker read failed) and count as 0: earnings are a floor.
+    earningsPartial?: boolean;
   };
   tradingVolume: WrappedTradingVolume;
-  // On-chain earnings from the indexer (Doppler Release + Clanker
-  // StoreTokens on the wallet's Bankr launches), doppler+clanker summed, ETH.
+  // On-chain earnings from the indexer (Doppler Release payouts + Clanker
+  // StoreTokens accrual on the wallet's Bankr launches) plus Doppler fees still
+  // unclaimed (both sides, current prices), ETH.
   // Becomes `earnings.totalEth` when meta.earningsSource is "indexer".
   earningsFromIndexer: number;
   // Bankr's own total (creator-fees + beneficiary-fees, claimed + claimable,
