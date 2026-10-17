@@ -4,6 +4,22 @@ Status key: **[fixed, uncommitted]** = changed in the working tree, not yet
 committed or deployed. **[open]** = not started. **[unverified]** = inferred
 from the code, not confirmed against live data.
 
+## Next session — pending (2026-10-17)
+
+- **Apply the volume fix to ALL tokens (owner decision).** The retry fix only
+  affects new runs; tokens already marked `complete` keep any swaps dropped in
+  the past. Plan: write a one-off script that resets every `complete` token to
+  `pending` (pricing_attempts = 0) so the sweep re-backfills it under the new
+  logic (most prices come from price_cache, so it's cheap), then run it and
+  check the results. Run it after `schema.sql` has been applied to prod.
+- Deploy checklist: run `schema.sql` on prod (also repairs stringified
+  tradingVolume rows) → set `X_REDIRECT_URI=https://bankrwrapped.com/auth/x/callback`
+  on Railway + register it in the X console → set `WRAPPED_WEBHOOK_SECRET` →
+  re-index the Base indexer → test sign-in on an iPhone and check client IPs
+  vary in API logs.
+- Offered, not started: CI (GitHub Actions running `bun run typecheck` +
+  `bun run test` with a Postgres service).
+
 ## Goal
 
 The indexer is meant to produce the most accurate earnings number for users.
