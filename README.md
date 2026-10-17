@@ -61,6 +61,8 @@ API tests never load `apps/api/.env`. Database tests are opt-in: set `TEST_DATAB
 TEST_DATABASE_URL=postgresql://user@localhost:5432/postgres bun run test
 ```
 
+CI (`.github/workflows/ci.yml`) runs both on every pull request and on pushes to `main`, with a Postgres service so the database tests run too.
+
 ## Deployment
 
 | Component | Where | Build / start |

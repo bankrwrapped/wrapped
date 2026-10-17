@@ -63,9 +63,9 @@ This is a real, live, rate-limited endpoint.
 ### Fields to never show
 
 - `claimable.unclaimedEth` / `claimable.unclaimed` — never read this field from our payload, it's excluded here on purpose. See "Unclaimed rewards" below for how to source this instead.
-- `earningsFromIndexer` — do not surface anywhere in the response.
+- `earningsFromIndexer` / `earningsFromBankr` — do not surface anywhere in the response. They're cross-check numbers; `earnings.*` is already whichever one should be shown.
 - Leaderboard earnings/position — do not include a leaderboard section in the Wrapped response at all.
-- Any `*Status` meta field (`creatorFeesStatus`, etc.) and pending/failed/in-progress token counts inside `tradingVolume` — internal only.
+- Any `*Status` meta field (`creatorFeesStatus`, etc.), `meta.earningsSource` and `meta.earningsFromIndexerIncomplete` and pending/failed/in-progress token counts inside `tradingVolume` — internal only.
 
 ### Unclaimed rewards — source natively, show the full breakdown
 

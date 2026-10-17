@@ -19,15 +19,18 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
   - **Order:** after `schema.sql` is applied **and** the new API is deployed (the old code would drop the same swaps again). The script refuses to run without the `pricing_attempts` column.
   - **Expect:** the sweep picks up reset tokens after 15 minutes idle. While they're pending, affected wallets show volume as incomplete. The sweep now skips a tick while the previous one is still running, so a large backlog stays at 3 concurrent backfills.
 - **After the re-index, check for `StoreTokens` rows with a null `launchedToken`.** The API reports these as `launch-unattributed`. *Unverified:* the attribution reads, within the same transaction, what an earlier event wrote, and Envio's preload ordering has caused problems in this repo before.
-- **CI:** GitHub Actions running `bun run typecheck` and `bun run test` with a Postgres service for the DB tests.
 
 ## Goal: the indexer as the source of truth
 
 The indexers exist to give users the most accurate earnings number, but that number doesn't reach users yet. `earnings.totalEth`, the leaderboard and the site all come from Bankr's creator-fees / beneficiary-fees API. `earningsFromIndexer` is computed and stored, but nothing displays it.
 
-1. After the re-index, store or log both numbers per wallet and compare them on known wallets. Expect the indexer's figure to be at or above Bankr's, since Bankr's endpoint uses `?days=90`.
-2. Once they agree, display the indexer number when its status is `ok`, falling back to Bankr. Ranking is already by ETH.
-3. Keep Bankr's figure as a cross-check and flag large disagreements.
+Built and waiting on the re-index; the switch is **off**.
+
+1. **Compare (ready):** after the re-index, run `apps/api/scripts/diagnostics/compare-earnings.ts --top 25` (or with known handles; add `--tokens` for per-token detail). Expect the indexer's figure to be at or above Bankr's. Bankr's is the WETH side only and uses `?days=90`, while the indexer counts both sides of Doppler fees over the full history. Wallets well below Bankr, or marked incomplete, are the ones to look at.
+2. **Switch (built, off):** set `EARNINGS_SOURCE=indexer` on the API. The per-token, creator, Please Bro and total figures then all come from the indexer, but only when its number is `ok` **and** complete. Otherwise the wallet falls back to Bankr. A wallet that was already showing the indexer number keeps its last indexer result rather than flipping back. The leaderboard follows, since it ranks by `earnings.totalEth`. Claimable, daily earnings, best day, streak and claim count stay Bankr's, because the indexer doesn't know what's unclaimed.
+3. **Cross-check (built):** every payload stores `earningsFromBankr` next to `earningsFromIndexer`, plus `meta.earningsSource`. The API logs `earnings disagreement` when they differ by 20% and at least 0.01 ETH.
+
+Caveats once it's on: cached profiles only switch when they're next fetched, so for a while the leaderboard ranks a mix of sources. Rolling back means unsetting the variable; profiles then return to Bankr on their next fetch.
 
 Bankr's API stays the source of *which tokens are Bankr launches*. Nothing on-chain marks a launch as Bankr's.
 

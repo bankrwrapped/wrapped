@@ -97,6 +97,23 @@ test("only Bankr launches count; Clanker attributed via launchedToken; unattribu
   expect(r.incompleteReasons.some((x) => x.startsWith("launch-unattributed:"))).toBe(true);
 });
 
+test("byToken splits the total per launched token and sums to totalEth", async () => {
+  pools["base:p4"] = { currency0: NATIVE, currency1: "0xlaunch", tokenIsToken0: false };
+  events.base = [
+    ev("base", { eventType: "Release", poolId: "p4", tokenAddress: "0xlaunch", amountToken0: String(ETH), amountToken1: "0" }),
+    ev("base", { amountToken0: String(ETH / 4n), launchedToken: "0xclank" }),
+    ev("base", { amountToken0: String(ETH / 4n), launchedToken: "0xclank" }),
+    ev("base", { amountToken0: String(9n * ETH), launchedToken: "0xnotbankr" }),
+  ];
+  const r = await getBeneficiaryFeesBreakdown(
+    "0xme", scope(bankrTokenKey("base", "0xlaunch"), bankrTokenKey("base", "0xClank")),
+  );
+  expect(Object.keys(r.byToken).sort()).toEqual(["base:0xclank", "base:0xlaunch"]);
+  expect(r.byToken["base:0xlaunch"]).toBeCloseTo(1, 10);
+  expect(r.byToken["base:0xclank"]).toBeCloseTo(0.5, 10);
+  expect(r.totalEth).toBeCloseTo(1.5, 10);
+});
+
 test("non-Bankr Doppler pools are excluded even when the wallet is the beneficiary", async () => {
   pools["base:p3"] = { currency0: NATIVE, currency1: "0xnotbankr", tokenIsToken0: false };
   events.base = [ev("base", {

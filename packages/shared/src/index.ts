@@ -167,16 +167,25 @@ export interface WrappedPayload {
     // beneficiaryFeesStatus already solve for the Bankr side) is fixed
     // for real here, same pattern, not a special case.
     earningsFromIndexerStatus: FeesFetchStatus;
+    // Some fee events couldn't be attributed, resolved or priced, so the
+    // indexer number understates. Missing on payloads cached before it existed.
+    earningsFromIndexerIncomplete?: boolean;
+    // Where `earnings` and each token's feesEarnedEth came from. "indexer"
+    // only when the API runs with EARNINGS_SOURCE=indexer and the indexer
+    // number is ok and complete; Bankr otherwise. Claimable, daily earnings,
+    // best day, streak and claim count always come from Bankr. Missing on
+    // payloads cached before it existed - those are Bankr.
+    earningsSource?: "bankr" | "indexer";
   };
   tradingVolume: WrappedTradingVolume;
-  // Module 8's real on-chain earnings breakdown (indexed_fee_events,
-  // Doppler Release + Clanker ClaimTokens/ClaimTokensPermissioned),
-  // doppler+clanker summed. OQ8 FINAL, 2026-08-15: single combined ETH
-  // total, no per-source split exposed. Additive alongside `earnings`
-  // above, which stays sourced from Bankr's own creator-fees/
-  // beneficiary-fees API - this is a separate, independently-fetched
-  // number, not a replacement for or component of `earnings.totalEth`.
+  // On-chain earnings from the indexer (Doppler Release + Clanker
+  // StoreTokens on the wallet's Bankr launches), doppler+clanker summed, ETH.
+  // Becomes `earnings.totalEth` when meta.earningsSource is "indexer".
   earningsFromIndexer: number;
+  // Bankr's own total (creator-fees + beneficiary-fees, claimed + claimable,
+  // WETH), kept whichever source is displayed so the two can be compared.
+  // Missing on payloads cached before it existed.
+  earningsFromBankr?: number;
 }
 
 export interface WrappedCacheRow {
