@@ -7,7 +7,7 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
 1. Run `apps/api/db/schema.sql` against production. It's idempotent. It adds the new columns, tables and indexes, and repairs `tradingVolume` values that were stored as strings (see *Fixed* below).
 2. Set `X_REDIRECT_URI=https://bankrwrapped.com/auth/x/callback` on Railway and register that callback URL in the X Developer Console.
 3. Set `WRAPPED_WEBHOOK_SECRET` on the API. "Wrapped ready" notifications are skipped while it's unset.
-4. Re-index the Base indexer (about 2 hours). This is required for the earnings fixes and the Clanker attribution.
+4. Re-index the Base indexer (about 2 hours, plus Clanker v3.1 from block 27,733,337). This is required for the earnings fixes, the Clanker attribution, Clanker claims (the v4 check) and the Clanker v3.1 launches. **Held until v3.1 is merged, so it runs once.**
 5. After deploying:
    - test sign-in on an iPhone (Safari)
    - check that client IPs vary in the API logs. If they don't, Railway is overwriting the worker's `X-Forwarded-For`, and every visitor shares one rate-limit bucket.
@@ -42,20 +42,28 @@ Checked on the leaderboard's top wallets. Our arithmetic matched Bankr's raw per
 - **Coverage confirmed.** Every Clanker v4 contract on Base was deployed after the indexer's start block (fee locker at block 31,526,701, start block 28,415,516), so v4 history is complete.
 - `compare-earnings.ts` prints "clanker verified" or "clanker NOT verified" per wallet.
 
-### v3.1 (Bankr launches from 2025-03-18 to about July 2025): researched, not built
+### v3.1 (Bankr launches from 2025-03-18 to about July 2025): built, needs the re-index
 
 Verified 2026-10-17 from clanker-devco/v3.1-contracts, the Clanker API and on-chain reads:
-- **Bankr launched through Clanker for almost a year.** Bankr's deployer `0x2112b8456AC07c15fA31ddf3Bf713E77716fF3F9` launched 140,541 Clanker tokens. They were v3.1 from 2025-03-18 (factory `0x2A787b…7382`, `LpLockerv2` `0x33e2Eda238edcF470309b8c6D228986A1204c8f9`), then v4 until the last one on 2026-02-10.
-- **How v3.1 fees work.** The pools are Uniswap v3 with a 1% fee. Clanker takes 20%, the creator takes `creatorReward`% (40% on every Bankr launch sampled), and the interface (Bankr; recipient `0xBB251CE08509CD6EeF32Ab4771E9D81522644Be6`) takes the rest. There's no fee locker. Fees sit in the LP position until anyone calls `collectRewards(positionId)`, which pays the recipients directly and emits `ClaimedRewards(lpTokenId, creatorRecipient, interfaceRecipient, …, token0, token1, creatorReward0, creatorReward1, …)`. Uncollected fees can be read with a read-only `collect` call from the locker on Uniswap's NonfungiblePositionManager.
-- **Bankr's API leaves v3.1 out entirely.** Rayblancoeth has 4 v3.1 positions, 0xDeployer 6 and jessepollak 3 (`getLpTokenIdsForCreator`). None appear in Bankr's fee API, so they're missing from our launch scope, launch count and Builder Type, earnings and volume.
-- **Value: not measured yet.** Those 13 positions show 0 WETH claimed and almost nothing uncollected; they're mostly test or dead tokens. Clanker's `creator-earnings` endpoint returns 0 even for Bankr's biggest v3.1 tokens, so it can't be used. Base's public RPC refuses historical log queries, so the full claimed history needs the indexer (HyperSync).
-- **Earlier versions: open.** DRB (2025-03-07) was Clanker v3.0 (`LPLockerv2` `0x5eC4f99F342038c67a312a166Ff56e6D70383D86`) from a different sender. Whether Bankr launched other tokens through v3.0 or v2 isn't confirmed.
+- **Bankr launched through Clanker for almost a year.** Bankr's deployer `0x2112b8456AC07c15fA31ddf3Bf713E77716fF3F9` launched 140,541 Clanker tokens. They were v3.1 from 2025-03-18 (factory `0x2A787b2362021cC3eEa3C24C4748a6cD5B687382`, deployed at block 27,733,337; `LpLockerv2` `0x33e2Eda238edcF470309b8c6D228986A1204c8f9`), then v4 until 2026-02-10.
+- **How v3.1 fees work.** The pools are Uniswap V3 with a 1% fee. Clanker takes 20%, the creator takes `creatorReward`% (40% on every Bankr launch sampled), and the interface (Bankr) the rest. There's no fee locker: fees sit in the LP position until anyone calls `collectRewards`, which pays out directly and emits `ClaimedRewards`.
+- **Bankr's API leaves v3.1 out entirely.** For example, Rayblancoeth has 4 v3.1 launches, 0xDeployer 6 and jessepollak 3, and none appear in Bankr's fee API.
 
-Plan, which needs a re-index, so ideally lands before the one that's pending:
-1. Index `LpLockerv2.ClaimedRewards` as earned-fee rows for `creatorRecipient` (`creatorReward0/1`, both tokens), attributed to the launch from `token0`/`token1`.
-2. Build our own v3.1 Bankr scope, since Bankr's API has none: the v3.1 factory's `TokenCreated` with `msgSender` = Bankr's deployer, recording `positionId` and the creator admin.
-3. Read uncollected fees per position (read-only `collect`) times the creator share.
-4. Decide whether v3.1 launches count toward the launch count, Builder Type and volume. That's a product decision.
+What's built (decided: v3.1 launches count toward the launch total and Builder Type):
+- **Indexer.** The chain now starts at the v3.1 factory's block, and every existing contract keeps its own `start_block` (28,415,516), so nothing else is replayed.
+  - `ClankerV31.TokenCreated` with `msgSender` = Bankr's deployer creates a `ClankerV31Launch`. Other senders aren't Bankr's, even when they name Bankr's interface admin; that was checked on real deploy transactions.
+  - `ClankerV31LpLocker.ClaimedRewards` for those positions writes the creator's share of both tokens as one `ClankerV31ClaimedRewards` fee row, using the new `tokenAddress1` column.
+- **API (`clankerV31.ts`).** A wallet's v3.1 launches are looked up by creator admin and join `tokens[]` with `source: "clanker_v3_1"`.
+  - Their fees are the collects paid to the wallet, valued at the time, plus the creator's share of what's still uncollected. The uncollected part is read on-chain by simulating `collect` as the locker, and only counts when the creator payout goes to this wallet.
+  - These fees go into creator earnings, unclaimed, and the indexer number.
+  - `summary.firstLaunch` is the earliest v3.1 launch.
+  - Volume skips the indexer, which only sees V4 swaps, and comes from GeckoTerminal or DexPaprika.
+  - The v3.1 queries are separate from the main fee query, so until the re-index the API simply has no v3.1 data and nothing else is affected. It logs "indexer has no v3.1 data yet".
+- **Checked on the real chain:** REMITTIX's position gives 0.000019 ETH uncollected for its creator and 0 for any other wallet, matching an independent viem read.
+
+Still open:
+- **Older launches.** DRB (2025-03-07) was Clanker v3.0 (`LPLockerv2` `0x5eC4f99F342038c67a312a166Ff56e6D70383D86`) from a different sender. Whether Bankr launched other tokens before v3.1 isn't confirmed.
+- **Fee recipient changes.** A v3.1 creator admin can change the fee recipient. Collects follow the recipient at collect time; uncollected fees count only when the current recipient is the wallet.
 
 ## Goal: the indexer as the source of truth
 

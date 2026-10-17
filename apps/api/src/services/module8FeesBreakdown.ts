@@ -172,6 +172,20 @@ async function priceLeg(
   event: IndexedFeeEventRow,
   leg: FeeLeg
 ): Promise<{ ethAmount: number; usdAmount: number }> {
+  return priceRawAmount(chain, leg.tokenAddress, leg.raw, event.timestamp, event.poolId ?? "");
+}
+
+// One raw token amount in ETH (and USD) at a moment in time - how every
+// indexed fee is valued. Exported for the Clanker v3.1 collects
+// (clankerV31.ts), which come from their own query.
+export async function priceRawAmount(
+  chain: Chain,
+  tokenAddress: string,
+  raw: bigint,
+  timestamp: string | number,
+  poolIdForPricing = ""
+): Promise<{ ethAmount: number; usdAmount: number }> {
+  const leg = { tokenAddress, raw };
   if (isEthLike(chain, leg.tokenAddress)) {
     return { ethAmount: rawToDecimal(leg.raw, 18), usdAmount: 0 };
   }
@@ -180,8 +194,7 @@ async function priceLeg(
   const tokenAmount = rawToDecimal(leg.raw, decimals);
 
   const wethAddr = WETH_ADDRESS[chain];
-  const poolIdForPricing = event.poolId ?? "";
-  const unixSeconds = toUnixSeconds(event.timestamp);
+  const unixSeconds = toUnixSeconds(timestamp);
   const [tokenPriceUsd, wethPriceUsd] = await Promise.all([
     getHistoricalPriceUsd(chain, leg.tokenAddress, unixSeconds, poolIdForPricing),
     getHistoricalPriceUsd(chain, wethAddr, unixSeconds, poolIdForPricing),

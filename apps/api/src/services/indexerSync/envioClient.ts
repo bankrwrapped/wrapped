@@ -316,6 +316,85 @@ export async function fetchClankerLedgerPage(
   return data[FEE_EVENT_ROOT_FIELD];
 }
 
+// ---- Clanker v3.1 (Bankr launches 2025-03-18 to about July 2025) ----
+// Separate queries from the fee events above on purpose: these entities and
+// columns only exist after the re-index that added v3.1, and a missing field
+// fails the whole GraphQL query - keeping them apart means an indexer that
+// hasn't been re-indexed yet only loses v3.1, not every fee number.
+
+export interface ClankerV31LaunchRow {
+  positionId: string;
+  tokenAddress: string;
+  name: string;
+  symbol: string;
+  timestamp: string;
+}
+
+const V31_LAUNCH_ROOT_FIELD = "ClankerV31Launch";
+
+export async function fetchClankerV31Launches(chain: string, creatorAdmin: string): Promise<ClankerV31LaunchRow[]> {
+  if (!CHAINS_WITH_LAUNCHED_TOKEN.has(chain)) return [];
+  const query = `
+    query V31Launches($chain: String!, $admin: String!) {
+      ${V31_LAUNCH_ROOT_FIELD}(where: { chain: { _eq: $chain }, creatorAdmin: { _eq: $admin } }, order_by: { blockNumber: asc }) {
+        positionId tokenAddress name symbol timestamp
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClankerV31LaunchRow[]>>(chain, query, {
+    chain,
+    admin: creatorAdmin.toLowerCase(),
+  });
+  return data[V31_LAUNCH_ROOT_FIELD].map((r) => ({ ...r, positionId: String(r.positionId) }));
+}
+
+export interface ClankerV31ClaimRow {
+  tokenAddress: string;
+  tokenAddress1: string;
+  launchedToken: string;
+  amountToken0: string;
+  amountToken1: string;
+  blockNumber: string;
+  logIndex: number;
+  timestamp: string;
+}
+
+export async function fetchClankerV31ClaimsPage(
+  chain: string,
+  recipient: string,
+  after: EventCursor,
+  limit: number = PAGE_SIZE,
+): Promise<ClankerV31ClaimRow[]> {
+  if (!CHAINS_WITH_LAUNCHED_TOKEN.has(chain)) return [];
+  const query = `
+    query V31Claims($chain: String!, $recipient: String!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
+      ${FEE_EVENT_ROOT_FIELD}(
+        where: {
+          chain: { _eq: $chain }
+          recipient: { _eq: $recipient }
+          eventType: { _eq: "ClankerV31ClaimedRewards" }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+        }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
+        limit: $limit
+      ) {
+        tokenAddress tokenAddress1 launchedToken amountToken0 amountToken1 blockNumber logIndex timestamp
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClankerV31ClaimRow[]>>(chain, query, {
+    chain,
+    recipient: recipient.toLowerCase(),
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
+    limit,
+  });
+  return data[FEE_EVENT_ROOT_FIELD];
+}
+
 // The last block the indexer has fully processed - an on-chain read at this
 // block sees exactly the state its events describe.
 export async function fetchLatestProcessedBlock(chain: string): Promise<bigint | null> {

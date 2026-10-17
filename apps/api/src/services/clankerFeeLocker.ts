@@ -1,4 +1,4 @@
-import { env } from "../config/env";
+import { abiWord, baseEthCall } from "./baseRpc";
 
 // What a wallet can actually claim from Clanker right now, read on-chain.
 //
@@ -13,32 +13,13 @@ const CLANKER_FEE_LOCKER = "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68";
 const BASE_WETH = "0x4200000000000000000000000000000000000006";
 // keccak256("availableFees(address,address)")[0:4]
 const AVAILABLE_FEES_SELECTOR = "0x8296535a";
-const TIMEOUT_MS = 10_000;
-
-const word = (address: string) => address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-
 export const CLANKER_FEE_TOKEN_WETH = BASE_WETH;
 
 // availableFees(wallet, token) in the token's raw units, at `block` (a block
 // number) or the latest block.
 export async function getAvailableFees(wallet: string, token: string, block?: bigint): Promise<bigint> {
-  const blockTag = block === undefined ? "latest" : "0x" + block.toString(16);
-  const res = await fetch(env.BASE_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_call",
-      params: [{ to: CLANKER_FEE_LOCKER, data: AVAILABLE_FEES_SELECTOR + word(wallet) + word(token) }, blockTag],
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`availableFees RPC call failed: ${res.status}`);
-  const json = (await res.json()) as { result?: string; error?: { message: string } };
-  if (json.error) throw new Error(`availableFees RPC error: ${json.error.message}`);
-  if (!json.result || json.result === "0x") throw new Error("availableFees returned no result");
-  return BigInt(json.result);
+  const result = await baseEthCall(CLANKER_FEE_LOCKER, AVAILABLE_FEES_SELECTOR + abiWord(wallet) + abiWord(token), { block });
+  return BigInt(result);
 }
 
 export async function getClankerClaimableWeth(wallet: string): Promise<number> {

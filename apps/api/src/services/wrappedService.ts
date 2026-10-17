@@ -22,6 +22,7 @@ import {
   type QuoteLegValue,
 } from "./bankrFeeValuation";
 import { getClankerLedger, type ClankerLedger } from "./clankerLedger";
+import { getClankerV31 } from "./clankerV31";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
@@ -52,7 +53,7 @@ const volumeComputationsInFlight = new Set<string>();
 const wrappedRequestsInFlight = new Map<string, Promise<WrappedCacheRow | null>>();
 
 function normalizeSource(raw: string): TokenSource {
-  if (raw === "doppler" || raw === "clanker") return raw;
+  if (raw === "doppler" || raw === "clanker" || raw === "clanker_v3_1") return raw;
   console.warn(
     "[wrappedService] normalizeSource: unrecognized token source \"" + raw + "\" -- treating as unknown"
   );
@@ -662,6 +663,12 @@ async function withDopplerClaimable(
   return { ...result, data: result.data + added, byToken, incomplete: result.incomplete || unpriced > 0 };
 }
 
+function mergeByToken(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + v;
+  return out;
+}
+
 function bothFeesOkFor(creator: { status: string }, beneficiary: { status: string }): boolean {
   return creator.status === "ok" && beneficiary.status === "ok";
 }
@@ -683,10 +690,12 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const toUsd = (weth: number) => weth * ethUsd;
 
   const learned = learnQuoteAddresses(creator.tokens);
-  const [creatorLegs, pleaseBroLegs, clanker] = await Promise.all([
+  const [creatorLegs, pleaseBroLegs, clanker, v31] = await Promise.all([
     valueQuoteLegs(creator.tokens, learned, ethUsd),
     valueQuoteLegs(beneficiary.tokens, learned, ethUsd),
     fetchClankerFees(match.evmAddress, [...creator.tokens, ...beneficiary.tokens], ethUsd),
+    // Bankr's Clanker v3.1 launches, which Bankr's API omits (see clankerV31.ts).
+    getClankerV31(match.evmAddress, ethUsd),
   ]);
 
   // Clanker is verified when the wallet's ledger reconciles with the chain
@@ -708,10 +717,14 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const noClanker: ClankerSide = { claimableEth: 0, earnedByToken: clankerSide.earnedByToken };
   const c = summarizeSide(creator.tokens, creatorLegs, clankerOnCreator ? clankerSide : noClanker);
   const p = summarizeSide(beneficiary.tokens, pleaseBroLegs, clankerOnCreator ? noClanker : clankerSide);
-  const launchedTokens = c.tokens;
+  // v3.1 launches count as the wallet's launches (count, Builder Type,
+  // volume) alongside Bankr's list.
+  const listed = new Set(c.tokens.map((t) => bankrTokenKey(t.chain, t.tokenAddress)));
+  const v31Tokens = v31.tokens.filter((t) => !listed.has(bankrTokenKey(t.chain, t.tokenAddress)));
+  const launchedTokens = [...c.tokens, ...v31Tokens];
   const pleaseBroTokens = p.tokens;
   const earningsPartial =
-    c.unpriced + p.unpriced > 0 || clanker.failed || (clanker.ledger?.claimableUnpriced ?? 0) > 0;
+    c.unpriced + p.unpriced > 0 || clanker.failed || (clanker.ledger?.claimableUnpriced ?? 0) > 0 || v31.partial;
 
   // Creator side: Bankr's lifetimeEarnedWeth (lifetime Doppler WETH claims -
   // matches the daily series exactly where they overlap; excludes Clanker)
@@ -719,7 +732,8 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   // field, so it stays 90 days + claimable.
   const lifetimeDopplerWeth = Math.max(parseAmount(creator.lifetimeEarnedWeth), c.dopplerWethClaimedEth);
   const bankrCreatorEth =
-    lifetimeDopplerWeth + (c.dopplerClaimedEth - c.dopplerWethClaimedEth) + c.dopplerClaimableEth + c.clankerEth;
+    lifetimeDopplerWeth + (c.dopplerClaimedEth - c.dopplerWethClaimedEth) + c.dopplerClaimableEth + c.clankerEth +
+    v31.earnedEth;
   const bankrPleaseBroEth = p.dopplerClaimedEth + p.dopplerClaimableEth + p.clankerEth;
   const bankrTotalEth = bankrCreatorEth + bankrPleaseBroEth;
 
@@ -736,9 +750,16 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       : earningsFromIndexerResult;
   // A Clanker wallet whose ledger doesn't reconcile with the chain may be
   // missing Clanker fees, so its indexer number can't be trusted as complete.
-  const indexer =
-    clanker.ledger && !clankerVerified && indexerWithClaimable.status === "ok"
-      ? { ...indexerWithClaimable, incomplete: true }
+  // v3.1 earnings are on-chain data too, so they're part of the indexer
+  // number; a partial v3.1 read makes it incomplete.
+  const indexer: IndexerEarningsResult =
+    indexerWithClaimable.status === "ok"
+      ? {
+          ...indexerWithClaimable,
+          data: indexerWithClaimable.data + v31.earnedEth,
+          byToken: mergeByToken(indexerWithClaimable.byToken, v31.byToken),
+          incomplete: indexerWithClaimable.incomplete || v31.partial || (clanker.ledger !== null && !clankerVerified),
+        }
       : indexerWithClaimable;
   if (indexer.status === "ok" && bothFeesOkFor(creatorResult, beneficiaryResult)) {
     warnOnEarningsDisagreement(match.evmAddress, bankrTotalEth, indexer.data, indexer.incomplete);
@@ -776,7 +797,8 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     pleaseBroEarningsEth = p.sum;
   }
   const totalEth = creatorEarningsEth + pleaseBroEarningsEth;
-  const unclaimedEth = c.dopplerClaimableEth + c.clankerClaimableEth + p.dopplerClaimableEth + p.clankerClaimableEth;
+  const unclaimedEth =
+    c.dopplerClaimableEth + c.clankerClaimableEth + p.dopplerClaimableEth + p.clankerClaimableEth + v31.claimableEth;
 
   const creatorEarnings = toUsd(creatorEarningsEth);
   const pleaseBroEarnings = toUsd(pleaseBroEarningsEth);
@@ -829,7 +851,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
 
   const bothFeesOk = bothFeesOkFor(creatorResult, beneficiaryResult);
   const allZero =
-    creator.tokens.length === 0 &&
+    tokens.length === 0 &&
     pleaseBro.length === 0 &&
     total === 0 &&
     unclaimed === 0;
@@ -858,7 +880,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     dailyEarnings,
     claimCount,
     longestStreakDays,
-    summary: { tokensLaunched: creator.tokens.length, hasActivity },
+    summary: { tokensLaunched: tokens.length, hasActivity, ...(v31.firstLaunch ? { firstLaunch: v31.firstLaunch } : {}) },
     meta: {
       creatorFeesStatus: creatorResult.status,
       beneficiaryFeesStatus: beneficiaryResult.status,

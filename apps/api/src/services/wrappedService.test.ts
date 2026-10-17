@@ -27,6 +27,10 @@ let ledgerCalls = 0;
 let clankerLedger: { claimableEth: number; claimableUnpriced: number; check: { reconciled: boolean } | null } = {
   claimableEth: 0, claimableUnpriced: 0, check: null,
 };
+// Clanker v3.1 launches (tested in clankerV31.test.ts).
+const noV31 = { tokens: [] as any[], byToken: {} as Record<string, number>, earnedEth: 0, claimableEth: 0, partial: false, firstLaunch: null as any };
+let v31 = noV31;
+mock.module("./clankerV31", () => ({ getClankerV31: async () => v31 }));
 mock.module("./clankerLedger", () => ({
   getClankerLedger: async () => { ledgerCalls += 1; return clankerLedger; },
 }));
@@ -85,6 +89,7 @@ beforeEach(() => {
   searchCalls = 0; searchStatus = 200; creatorStatus = 200; capturedScope = null; ledgerCalls = 0;
   indexerBreakdown = breakdown(0.25);
   clankerLedger = { claimableEth: 0, claimableUnpriced: 0, check: null };
+  v31 = noV31;
   creatorTokens = [entry({ claimable: { token0: "0.05", token1: "0" }, claimed: { token0: "0.05", token1: "0", count: 1 } })];
   beneficiaryTokens = [entry({ tokenAddress: "0xBBB", name: "B", symbol: "B", chain: "robinhood", token1Label: "B" })];
   creatorExtra = {};
@@ -314,4 +319,34 @@ test("switch on: a previous indexer-sourced result is kept rather than flipping 
   // Switched back off: Bankr's number wins again.
   delete process.env.EARNINGS_SOURCE;
   expect(mergeWithCache(fresh, previous).meta.earningsSource).toBe("bankr");
+});
+
+// ---- Clanker v3.1 launches ----
+
+const v31Token = (addr: string, fees: number) => ({
+  tokenAddress: addr, name: "Old", symbol: "OLD", chain: "base", feesEarnedEth: fees, source: "clanker_v3_1",
+});
+
+test("v3.1 launches count as launches and their fees count as creator earnings", async () => {
+  v31 = {
+    tokens: [v31Token("0xOld1", 0.2), v31Token("0xOld2", 0)],
+    byToken: { "base:0xold1": 0.2 }, earnedEth: 0.25, claimableEth: 0.05, partial: false,
+    firstLaunch: { tokenAddress: "0xold1", name: "Old", symbol: "OLD", chain: "base", launchedAt: "2025-03-20T10:00:00.000Z" },
+  };
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(p.tokens.map((t) => t.tokenAddress)).toEqual(["0xAAA", "0xOld1", "0xOld2"]);
+  expect(p.summary.tokensLaunched).toBe(3); // Builder Type counts tokens
+  expect(p.earnings.creatorEarningsEth).toBeCloseTo(0.1 + 0.25, 10);
+  expect(p.claimable.unclaimedEth).toBeCloseTo(0.05 + 0.05, 10);
+  expect(p.earningsFromIndexer).toBeCloseTo(0.3 + 0.25, 10); // on-chain data: part of the indexer number
+  expect(p.meta.earningsPartial).toBe(false);
+  expect(p.summary.firstLaunch?.symbol).toBe("OLD");
+});
+
+test("a v3.1 token already in Bankr's list isn't listed twice; a partial v3.1 read is flagged", async () => {
+  v31 = { tokens: [v31Token("0xaaa", 0.2)], byToken: {}, earnedEth: 0, claimableEth: 0, partial: true, firstLaunch: null };
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(p.tokens.length).toBe(1);
+  expect(p.meta.earningsPartial).toBe(true);
+  expect(p.meta.earningsFromIndexerIncomplete).toBe(true);
 });

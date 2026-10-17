@@ -53,7 +53,7 @@ The response is a wrapper; **everything below lives under `payload`**:
 `rank`, `totalUsers` and `percentile` are leaderboard data — don't use them (see below).
 
 **What the numbers measure.** All fee figures are in ETH. Fees paid in BNKR or tokenized stocks are converted at current prices.
-- `earnings.creatorEarningsEth` — everything the user has claimed on their launches (lifetime for WETH fees; the last 90 days for Clanker and non-WETH fees) plus what's claimable now.
+- `earnings.creatorEarningsEth` — everything the user has claimed on their launches (lifetime for WETH fees and for 2025 Clanker v3.1 launches; the last 90 days for other non-WETH fees) plus what's claimable now.
 - `earnings.pleaseBroEarningsEth` — Please Bro fees claimed in the last 90 days plus claimable now. Bankr has no lifetime figure for this side.
 - `bestDay` — the user's best claim day ever (WETH fees).
 - `longestStreakDays` and `claimCount` — claims in the **last 90 days**.
@@ -63,8 +63,8 @@ If `payload.meta.earningsPartial` is `true`, some fees couldn't be valued, so fr
 Field reference (all under `payload`):
 
 - `tokens[]` — launched tokens (creator-fee side), each with `name`, `symbol`, `chain`, `feesEarnedEth`. Spans both chains via the `chain` field (`base` / `robinhood`).
-  - **Total tokens launched = `tokens.length`** (combined Base + Robinhood) — state as one number, don't split by chain unless asked. This is all of the user's launches, not only recent ones.
-  - **First launch** — do NOT derive this from `tokens[]` array order; there is no timestamp or ordering field on these entries and array order has produced wrong results before. Instead, fetch the user's first-ever launched token (name and chain) from your own native Bankr access, the same way you already source leaderboard data and unclaimed rewards. Only include the "Where It Started" section if you can confirm this from your own data — if you can't determine it, omit that section rather than guessing from `tokens[]`.
+  - **Total tokens launched = `tokens.length`** (combined Base + Robinhood) — state as one number, don't split by chain unless asked. This is all of the user's launches, not only recent ones, including their 2025 Bankr launches on Clanker v3.1 (`source: "clanker_v3_1"`), which Bankr's own token list leaves out. Count them like any other launch.
+  - **First launch** — if `payload.summary.firstLaunch` is present (`{ name, symbol, chain, launchedAt }`), use it: it's the user's earliest Bankr launch, from Clanker v3.1 (March–July 2025), earlier than anything your native Bankr access lists. Otherwise, do NOT derive it from `tokens[]` array order (there's no timestamp on those entries and array order has produced wrong results before); fetch the user's first-ever launched token (name and chain) from your own native Bankr access, and only include "Where It Started" if you can confirm it — omit the section rather than guessing.
 - `pleaseBroTokens[]` — same shape, beneficiary-fee side. Only mention this section if `pleaseBroTokens.length > 0`.
 - `earnings.totalEth` / `earnings.creatorEarningsEth` / `earnings.pleaseBroEarningsEth` — display ETH figures only, never the internal USD fields (`earnings.total`, `earnings.creatorEarnings`, `earnings.pleaseBroEarnings` are ranking-internal only — do not surface them). They're Bankr's on-chain fee data and recent claims, not an audited total.
 - `bestDay` — `{ date, eth }` or `null`: the user's best claim day ever. If `null`, omit the BEST CLAIM DAY block rather than showing 0.

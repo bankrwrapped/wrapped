@@ -156,6 +156,10 @@ export interface WrappedPayload {
   summary: {
     tokensLaunched: number;
     hasActivity: boolean;
+    // The wallet's earliest known Bankr launch, when it was on Clanker v3.1
+    // (2025-03-18 to about July 2025) - earlier than anything on v4 or Doppler.
+    // Absent otherwise: Bankr's token list has no launch dates.
+    firstLaunch?: { tokenAddress: string; name: string; symbol: string; chain: Chain; launchedAt: string };
   };
   // Distinguishes "genuinely zero" from "Bankr's endpoint failed" (or, as
   // of Module 8, the indexer failing) so the frontend can show an honest

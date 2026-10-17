@@ -26,3 +26,9 @@ test("DexScreener is never consulted; unresolved tokens are excluded, not 24h-va
   expect(r.volumeUsd).toBeNull();
   expect(notFoundCached).toBe(1);
 });
+
+test("Clanker v3.1 tokens (Uniswap V3) skip the indexer, which only sees V4 swaps", async () => {
+  called.length = 0;
+  await resolveTokenVolume({ address: "0xv31", chain: "base", source: "clanker_v3_1" });
+  expect(called).toEqual(["gecko", "paprika"]);
+});
