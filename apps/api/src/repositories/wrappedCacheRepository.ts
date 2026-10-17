@@ -14,11 +14,24 @@ interface ProfileRow {
 // request (see wrappedService.attachRank), never persisted, so this
 // repository never has real values for them and shouldn't claim to.
 export type PersistedWrappedRow = Omit<WrappedCacheRow, "rank" | "totalUsers" | "percentile">;
+// Rows written by the old updateTradingVolume hold tradingVolume as a JSON
+// string (see the note there). schema.sql repairs them in place; this keeps
+// them readable until it has been run.
+function normalizePayload(payload: WrappedPayload): WrappedPayload {
+  const tv = payload.tradingVolume as unknown;
+  if (typeof tv !== "string") return payload;
+  try {
+    return { ...payload, tradingVolume: JSON.parse(tv) };
+  } catch {
+    return payload;
+  }
+}
+
 function toCacheRow(row: ProfileRow): PersistedWrappedRow {
   return {
     walletAddress: row.wallet_address,
     username: row.username,
-    payload: row.payload,
+    payload: normalizePayload(row.payload),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
 }
@@ -216,7 +229,11 @@ export const wrappedCacheRepository = {
   ): Promise<void> {
     await db`
       update wrapped_profiles
-      set payload = jsonb_set(payload, '{tradingVolume}', ${JSON.stringify(tradingVolume)}::jsonb)
+      -- Pass the OBJECT, not JSON.stringify(...): Bun's SQL client binds a
+      -- string as a JSON string, so ::jsonb produced the scalar
+      -- "{\"totalVolumeUsd\":...}" and every background result was stored
+      -- as a string - .status/.isComplete/.updatedAt all read undefined.
+      set payload = jsonb_set(payload, '{tradingVolume}', ${tradingVolume}::jsonb)
       where wallet_address = ${wallet}
     `;
   },

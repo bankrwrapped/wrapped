@@ -28,6 +28,12 @@ create table if not exists wrapped_profiles (
   ready_notified_at timestamptz
 );
 alter table wrapped_profiles add column if not exists ready_notified_at timestamptz;
+-- One-time repair (safe to re-run - matches nothing once fixed): the old
+-- updateTradingVolume stored payload.tradingVolume as a JSON *string*
+-- instead of an object. Parse those back into objects.
+update wrapped_profiles
+  set payload = jsonb_set(payload, '{tradingVolume}', (payload->>'tradingVolume')::jsonb)
+  where jsonb_typeof(payload->'tradingVolume') = 'string';
 
 -- Ranking is by ETH (the displayed figure) with immutable tie-breaks - see
 -- wrappedCacheRepository.getRank. Was USD-based, which mixed each user's
