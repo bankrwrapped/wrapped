@@ -11,5 +11,5 @@
       "@bankr-wrapped/shared": ["../../packages/shared/src"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "scripts"]
 }

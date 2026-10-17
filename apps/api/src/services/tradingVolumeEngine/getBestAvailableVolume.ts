@@ -37,7 +37,7 @@ export async function getBestAvailableVolume(
 ): Promise<BestAvailableVolumeResult> {
   // Ensure every token carries the wallet address so cold-start paths
   // inside the waterfall can record requests correctly (item 19 wiring).
-  // Callers that already set this per-token (calculateBuilderVolume.ts)
+  // Callers that already set this per-token (scripts/diagnostics/builder-volume.ts)
   // are left untouched; this only fills in what's missing.
   const taggedTokens = tokens.map((t) => ({
     ...t,
