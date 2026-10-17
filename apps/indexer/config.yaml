@@ -107,6 +107,20 @@ contracts:
           transaction_fields:
             - hash
 
+  # Both Base v4 LP lockers (ClankerLpLocker + ClankerLpLockerFeeConversion,
+  # addresses from clanker-devco/v4-contracts README). Watched ONLY for
+  # ClaimedRewards, which is how StoreTokens gets attributed to the launch it
+  # was earned on: _collectRewards(token) calls feeLocker.storeFees() for
+  # each recipient, then emits ClaimedRewards(token) - same tx, after them.
+  - name: ClankerLpLocker
+    handler: src/EventHandlers.ts
+    events:
+      - event: "ClaimedRewards(address indexed token, uint256 amount0, uint256 amount1, uint256[] rewards0, uint256[] rewards1)"
+        name: ClaimedRewards
+        field_selection:
+          transaction_fields:
+            - hash
+
 chains:
   - id: 8453 # Base mainnet
     start_block: 28415516 # Airlock's real deployment block (2026-08-07, on-chain confirmed) — see §2 OQ1
@@ -126,6 +140,10 @@ chains:
       - name: ClankerFeeLocker
         address:
           - "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68"
+      - name: ClankerLpLocker
+        address:
+          - "0x29d17C1A8D851d7d4cA97FAe97AcAdb398D9cCE0" # ClankerLpLocker
+          - "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496" # ClankerLpLockerFeeConversion
 
   # Robinhood Chain (4663) intentionally omitted — see header note. Splice
   # in Module 3's real, current chain block here once produced; do not

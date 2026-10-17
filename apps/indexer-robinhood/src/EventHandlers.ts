@@ -198,7 +198,7 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Release" }, async 
     poolId,
     tokenAddress: pool.tokenAddress,
     eventType: "Release",
-    recipient: event.params.beneficiary,
+    recipient: normalizeAddress(event.params.beneficiary), // lowercased so the API's recipient filter matches
     amountToken0: event.params.fees0,
     amountToken1: event.params.fees1,
     blockNumber: BigInt(event.block.number),
