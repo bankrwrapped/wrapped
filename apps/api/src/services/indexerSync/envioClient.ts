@@ -57,6 +57,27 @@ export interface IndexedSwapRow {
 
 export const PAGE_SIZE = 1000; // <- only change on this line: added `export`
 
+// Keyset cursor for paging. Paging on blockNumber alone (`> lastBlock`)
+// silently skipped the rest of a block whenever a page boundary fell inside
+// it; (blockNumber, logIndex) is unique per event, so nothing is skipped.
+export interface EventCursor {
+  blockNumber: string;
+  logIndex: number;
+}
+
+// Postgres int4 max - "after every log in this block".
+const MAX_LOG_INDEX = 2147483647;
+
+// Cursor positioned after ALL events in `blockNumber` - for starting a scan
+// from a block checkpoint (or "0" for from-genesis).
+export function cursorAfterBlock(blockNumber: string): EventCursor {
+  return { blockNumber, logIndex: MAX_LOG_INDEX };
+}
+
+export function cursorAfterEvent(event: { blockNumber: string; logIndex: number }): EventCursor {
+  return { blockNumber: event.blockNumber, logIndex: event.logIndex };
+}
+
 // Permanent Hasura field names, per playbook §6.5 (RESOLVED PERMANENTLY
 // 2026-08-08, fixed via pg_set_table_customization, no longer dependent on
 // tracking state) -- confirmed live 2026-08-09 against a real query, not
@@ -74,7 +95,7 @@ const SUPPORTED_CHAINS = new Set(["base", "robinhood"]);
 export async function fetchIndexedSwapsPage(
   chain: string,
   tokenAddress: string,
-  fromBlockExclusive: string,
+  after: EventCursor,
   limit: number = PAGE_SIZE,
 ): Promise<IndexedSwapRow[]> {
   if (!SUPPORTED_CHAINS.has(chain)) {
@@ -83,10 +104,17 @@ export async function fetchIndexedSwapsPage(
   const rootField = SWAP_ROOT_FIELD;
 
   const query = `
-    query SwapsPage($chain: String!, $token: String!, $fromBlock: numeric!, $limit: Int!) {
+    query SwapsPage($chain: String!, $token: String!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
       ${rootField}(
-        where: { chain: { _eq: $chain }, tokenAddress: { _eq: $token }, blockNumber: { _gt: $fromBlock } }
-        order_by: { blockNumber: asc }
+        where: {
+          chain: { _eq: $chain }
+          tokenAddress: { _eq: $token }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+        }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
         limit: $limit
       ) {
         id chain poolId tokenAddress blockNumber logIndex timestamp amountToken
@@ -96,7 +124,8 @@ export async function fetchIndexedSwapsPage(
   const data = await envioQuery<Record<string, IndexedSwapRow[]>>(chain, query, {
     chain,
     token: tokenAddress,
-    fromBlock: fromBlockExclusive,
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
     limit,
   });
   return data[rootField];
@@ -161,6 +190,10 @@ export interface IndexedFeeEventRow {
   tokenAddress: string;
   eventType: "Collect" | "Release" | "StoreTokens" | "ClaimTokens" | "ClaimTokensPermissioned";
   recipient: string | null;
+  // The launch these fees were earned on (see the indexer's schema.graphql).
+  // Only selected on chains whose indexer has the column - see
+  // CHAINS_WITH_LAUNCHED_TOKEN - and null there for unattributed rows.
+  launchedToken?: string | null;
   amountToken0: string | null;
   amountToken1: string | null;
   blockNumber: string;
@@ -173,10 +206,23 @@ export interface IndexedFeeEventRow {
 // the same schema introspection - IndexedFeeEvent is not chain-prefixed.
 const FEE_EVENT_ROOT_FIELD = "IndexedFeeEvent";
 
+// Fees EARNED, each attributable to the launch that produced it: Doppler
+// Release (pool-keyed) and Clanker StoreTokens (attributed via
+// ClaimedRewards). Clanker claims (ClaimTokens/ClaimTokensPermissioned) are
+// deliberately excluded - they pay out a pooled per-fee-token balance that
+// can't be tied to a launch, and counting them alongside StoreTokens would
+// double-count the same fees.
+const EARNED_FEE_EVENT_TYPES = ["Release", "StoreTokens"];
+
+// Robinhood's indexer has no launchedToken column (no Clanker there), so
+// selecting it would fail the whole query - Doppler rows are attributed by
+// tokenAddress instead, which is already the launched token.
+const CHAINS_WITH_LAUNCHED_TOKEN = new Set(["base"]);
+
 export async function fetchIndexedFeeEventsPage(
   chain: string,
   recipient: string,
-  fromBlockExclusive: string,
+  after: EventCursor,
   limit: number = PAGE_SIZE,
 ): Promise<IndexedFeeEventRow[]> {
   if (!SUPPORTED_CHAINS.has(chain)) {
@@ -185,25 +231,35 @@ export async function fetchIndexedFeeEventsPage(
   const rootField = FEE_EVENT_ROOT_FIELD;
 
   const query = `
-    query FeeEventsPage($chain: String!, $recipient: String!, $fromBlock: numeric!, $limit: Int!) {
+    query FeeEventsPage($chain: String!, $recipients: [String!]!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
       ${rootField}(
         where: {
           chain: { _eq: $chain }
-          recipient: { _eq: $recipient }
-          blockNumber: { _gt: $fromBlock }
-          eventType: { _in: ["Release", "ClaimTokens", "ClaimTokensPermissioned"] }
+          recipient: { _in: $recipients }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+          eventType: { _in: ${JSON.stringify(EARNED_FEE_EVENT_TYPES)} }
         }
-        order_by: { blockNumber: asc }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
         limit: $limit
       ) {
-        id chain poolId tokenAddress eventType recipient amountToken0 amountToken1 blockNumber txHash logIndex timestamp
+        id chain poolId tokenAddress eventType recipient amountToken0 amountToken1 blockNumber txHash logIndex timestamp${
+          CHAINS_WITH_LAUNCHED_TOKEN.has(chain) ? " launchedToken" : ""
+        }
       }
     }
   `;
+  // The indexer stores recipients lowercased, but Doppler Release rows
+  // indexed before that fix kept the raw (checksummed) beneficiary - match
+  // both forms until a full re-index has replaced them.
+  const recipients = Array.from(new Set([recipient.toLowerCase(), recipient]));
   const data = await envioQuery<Record<string, IndexedFeeEventRow[]>>(chain, query, {
     chain,
-    recipient,
-    fromBlock: fromBlockExclusive,
+    recipients,
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
     limit,
   });
   return data[rootField];

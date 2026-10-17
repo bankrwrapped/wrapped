@@ -6,13 +6,19 @@ interface Bucket {
   resetAt: number;
 }
 
-const buckets = new Map<string, Bucket>();
+// One bucket map PER limiter. A single shared map keyed only by IP meant
+// every limiter counted against the same per-IP bucket, with whichever
+// limiter created it deciding the window - typeahead search ate into the
+// wrapped-route budget and vice versa.
+const allBuckets: Map<string, Bucket>[] = [];
 
-// Sweep stale buckets periodically so the map doesn't grow forever.
+// Sweep stale buckets periodically so the maps don't grow forever.
 setInterval(() => {
   const now = Date.now();
-  for (const [key, bucket] of buckets) {
-    if (now >= bucket.resetAt) buckets.delete(key);
+  for (const buckets of allBuckets) {
+    for (const [key, bucket] of buckets) {
+      if (now >= bucket.resetAt) buckets.delete(key);
+    }
   }
 }, 60_000);
 
@@ -22,6 +28,8 @@ export interface RateLimitResult {
 }
 
 export function createRateLimiter(windowMs: number, max: number) {
+  const buckets = new Map<string, Bucket>();
+  allBuckets.push(buckets);
   return function check(key: string): RateLimitResult {
     const now = Date.now();
     const bucket = buckets.get(key);
@@ -42,6 +50,15 @@ export function createRateLimiter(windowMs: number, max: number) {
 
 // 20 requests per minute per IP on the search/lookup route.
 export const checkWrappedRouteLimit = createRateLimiter(60_000, 20);
+
+// /api/auth/me runs on every page load (useAuth on mount) and hits the DB,
+// plus Bankr for wallet-less sessions - previously unlimited.
+export const checkAuthMeRouteLimit = createRateLimiter(60_000, 30);
+
+// Bankr re-resolve for a session that had no wallet at login: at most once
+// per 5 minutes per session (keyed by session id), instead of on every
+// /api/auth/me call.
+export const checkWalletResolveRetryLimit = createRateLimiter(5 * 60_000, 1);
 
 // More permissive - this route backs live typeahead-as-you-type, so a
 // single user typing one handle can easily fire 5-10 requests.

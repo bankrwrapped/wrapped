@@ -1,11 +1,12 @@
-import { fetchIndexedFeeEventsPage, fetchWatchedPool, IndexedFeeEventRow, PAGE_SIZE } from "./indexerSync/envioClient";
+import { cursorAfterBlock, cursorAfterEvent, fetchIndexedFeeEventsPage, fetchWatchedPool, IndexedFeeEventRow, PAGE_SIZE, type WatchedPoolRow } from "./indexerSync/envioClient";
 import { getHistoricalPriceUsd } from "./pricingService";
+import { mapWithConcurrency } from "../utils/mapWithConcurrency";
 import { getDecimals } from "./indexerSync/decimalsService";
 import type { Chain } from "@bankr-wrapped/shared";
 
 // =============================================================================
 // Module 8 — beneficiary fee-event breakdown (Doppler Release + Clanker
-// ClaimTokens/ClaimTokensPermissioned), priced and grouped by SOURCE, with a
+// StoreTokens, scoped to Bankr launches), priced and grouped by SOURCE, with a
 // real per-pool incomplete flag. NEW module, additive alongside the existing
 // creator-fees/beneficiary-fees earnings on WrappedPayload — does not
 // replace Bankr's public API calls.
@@ -67,58 +68,72 @@ export interface BeneficiaryFeesBreakdown {
   incompleteReasons: string[];
 }
 
+// Earned-fee events only (see envioClient's EARNED_FEE_EVENT_TYPES): Clanker
+// is counted at accrual (StoreTokens), not at claim, because a claim pays out
+// a pooled balance that can't be tied back to the launch that earned it.
 function eventTypeToSource(eventType: IndexedFeeEventRow["eventType"]): FeeSource | null {
   switch (eventType) {
     case "Release":
       return "doppler";
-    case "ClaimTokens":
-    case "ClaimTokensPermissioned":
+    case "StoreTokens":
       return "clanker";
     default:
       return null;
   }
 }
 
-// Clanker path — CONFIRMED (Module 2): amountToken0 always, no exceptions.
-// Doppler path — NOW REAL, not a placeholder: resolved via the pool's
-// actual WatchedPool.tokenIsToken0. Caller guarantees this is only invoked
-// once tokenIsToken0 is known non-null — the null/pending case is filtered
-// out before this is called, never guessed here.
-function resolveEventAmountRaw(event: IndexedFeeEventRow, tokenIsToken0: boolean | null): bigint {
+// Key for a set of Bankr-launched tokens - see getBeneficiaryFeesBreakdown's
+// `bankrTokens` param.
+export function bankrTokenKey(chain: string, tokenAddress: string): string {
+  return `${chain}:${tokenAddress.toLowerCase()}`;
+}
+
+// The launch an earned-fee event belongs to. Doppler rows' tokenAddress is
+// already the pool's launched token; Clanker StoreTokens rows' tokenAddress
+// is the FEE token, so they use the indexer's launchedToken attribution.
+function launchedTokenOf(event: IndexedFeeEventRow): string | null {
+  if (event.eventType === "StoreTokens") return event.launchedToken ?? null;
+  return event.tokenAddress;
+}
+
+// Uniswap V4 represents native ETH as currency address(0) - Doppler pools
+// with an ETH numeraire pay that side of their fees in it.
+const NATIVE_ETH_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function isEthLike(chain: Chain, tokenAddress: string): boolean {
+  const addr = tokenAddress.toLowerCase();
+  return addr === NATIVE_ETH_ADDRESS || addr === WETH_ADDRESS[chain].toLowerCase();
+}
+
+interface FeeLeg {
+  tokenAddress: string;
+  raw: bigint;
+}
+
+// Clanker path — CONFIRMED (Module 2): one amount, amountToken0, in the
+// event's own tokenAddress (the fee token deposited - usually WETH).
+// Doppler path: Release pays fees0 in the pool's currency0 AND fees1 in its
+// currency1. Both sides are real earnings - previously only the launched
+// token's side was counted, which dropped the numeraire (usually ETH/WETH)
+// side, i.e. most of the money. Caller guarantees `pool` is resolved
+// (tokenIsToken0 non-null) for pool-keyed events.
+function resolveEventLegs(event: IndexedFeeEventRow, pool: WatchedPoolRow | null): FeeLeg[] {
   if (event.poolId === null) {
-    return BigInt(event.amountToken0 ?? "0");
+    return [{ tokenAddress: event.tokenAddress, raw: BigInt(event.amountToken0 ?? "0") }];
   }
-  if (tokenIsToken0 === true) return BigInt(event.amountToken0 ?? "0");
-  if (tokenIsToken0 === false) return BigInt(event.amountToken1 ?? "0");
-  throw new Error(`resolveEventAmountRaw: called with unresolved tokenIsToken0 for poolId=${event.poolId}`);
+  if (!pool || pool.tokenIsToken0 === null) {
+    throw new Error(`resolveEventLegs: called with unresolved pool for poolId=${event.poolId}`);
+  }
+  return [
+    { tokenAddress: pool.currency0, raw: BigInt(event.amountToken0 ?? "0") },
+    { tokenAddress: pool.currency1, raw: BigInt(event.amountToken1 ?? "0") },
+  ].filter((leg) => leg.raw > 0n);
 }
 
 function rawToDecimal(raw: bigint, decimals: number): number {
   return Number(raw) / 10 ** decimals;
 }
 
-// Runs fn over items with at most `limit` in flight at once, preserving
-// input order in the returned array. Added to fix fetchEarningsFromIndexer
-// timing out at 25s: priceOneEvent was being awaited one at a time per
-// event in getBeneficiaryFeesBreakdown's inner loop, and per-call latency
-// (GoldRush 400ms-3000ms, GeckoTerminal fallback throttled at 6100ms min)
-// stacks linearly against wallets with more than a handful of fee events.
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let idx = 0;
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++;
-      results[i] = await fn(items[i]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
 // Real per-token decimals via decimalsService's getDecimals() (DB cache,
 // falling back to a live on-chain eth_call — see decimalsService.ts).
 // Supports both 'base' and 'robinhood' (item 38 follow-up: robinhood RPC wired).
@@ -137,164 +152,212 @@ interface PricedEvent {
   usedFallbackDecimals: boolean;
 }
 
+function toUnixSeconds(timestamp: string | number): number {
+  if (typeof timestamp === "number") return timestamp;
+  const ms = new Date(timestamp).getTime();
+  if (Number.isNaN(ms)) {
+     throw new Error(`toUnixSeconds: unparseable timestamp: ${timestamp}`);
+  }
+  return Math.floor(ms / 1000);
+}
+
+// Prices one fee leg into ETH. ETH/WETH legs are taken at face value (18
+// decimals, no price lookup, usdAmount 0 as before); anything else is priced
+// in USD at the event's time and converted via the WETH price at that time.
+async function priceLeg(
+  chain: Chain,
+  event: IndexedFeeEventRow,
+  leg: FeeLeg
+): Promise<{ ethAmount: number; usdAmount: number }> {
+  if (isEthLike(chain, leg.tokenAddress)) {
+    return { ethAmount: rawToDecimal(leg.raw, 18), usdAmount: 0 };
+  }
+
+  const { decimals } = await resolveDecimals(chain, leg.tokenAddress);
+  const tokenAmount = rawToDecimal(leg.raw, decimals);
+
+  const wethAddr = WETH_ADDRESS[chain];
+  const poolIdForPricing = event.poolId ?? "";
+  const unixSeconds = toUnixSeconds(event.timestamp);
+  const [tokenPriceUsd, wethPriceUsd] = await Promise.all([
+    getHistoricalPriceUsd(chain, leg.tokenAddress, unixSeconds, poolIdForPricing),
+    getHistoricalPriceUsd(chain, wethAddr, unixSeconds, poolIdForPricing),
+  ]);
+
+  const usdAmount = tokenAmount * tokenPriceUsd;
+  const ethAmount = wethPriceUsd > 0 ? usdAmount / wethPriceUsd : 0;
+  return { ethAmount, usdAmount };
+}
+
+// An event only counts if every one of its legs prices - a half-priced
+// Release would silently understate earnings, so it's marked failed instead.
 async function priceOneEvent(
   chain: Chain,
   event: IndexedFeeEventRow,
-  tokenIsToken0: boolean | null
+  pool: WatchedPoolRow | null
 ): Promise<PricedEvent> {
-  const rawAmount = resolveEventAmountRaw(event, tokenIsToken0);
-
-  let decimals: number;
-  let usedFallbackDecimals: boolean;
   try {
-    const resolved = await resolveDecimals(chain, event.tokenAddress);
-    decimals = resolved.decimals;
-    usedFallbackDecimals = resolved.usedFallback;
+    const legs = resolveEventLegs(event, pool);
+    const priced = await Promise.all(legs.map((leg) => priceLeg(chain, event, leg)));
+    return {
+      ethAmount: priced.reduce((sum, p) => sum + p.ethAmount, 0),
+      usdAmount: priced.reduce((sum, p) => sum + p.usdAmount, 0),
+      failed: false,
+      usedFallbackDecimals: false,
+    };
   } catch (err) {
     console.error(
-      `[priceOneEvent] getDecimals FAILED chain=${chain} tokenAddress=${event.tokenAddress} ` +
-      `txHash=${event.txHash} logIndex=${event.logIndex} :: ` +
+      `[priceOneEvent FAILED] chain=${chain} tokenAddress=${event.tokenAddress} ` +
+      `poolId=${event.poolId} txHash=${event.txHash} ` +
+      `logIndex=${event.logIndex} timestamp=${event.timestamp} :: ` +
       `${err instanceof Error ? err.message : String(err)}`
     );
     return { ethAmount: 0, usdAmount: 0, failed: true, usedFallbackDecimals: false };
   }
-
-  const tokenAmount = rawToDecimal(rawAmount, decimals);
-
-  const wethAddr = WETH_ADDRESS[chain];
-  const isAlreadyEth = event.tokenAddress.toLowerCase() === wethAddr.toLowerCase();
-
-  if (isAlreadyEth) {
-    return { ethAmount: tokenAmount, usdAmount: 0, failed: false, usedFallbackDecimals };
-  }
-
-  function toUnixSeconds(timestamp: string | number): number {
-    if (typeof timestamp === "number") return timestamp;
-    const ms = new Date(timestamp).getTime();
-    if (Number.isNaN(ms)) {
-       throw new Error(`toUnixSeconds: unparseable timestamp: ${timestamp}`);
-    }
-    return Math.floor(ms / 1000);
-  }
-
-  try {
-    const poolIdForPricing = event.poolId ?? "";
-    const unixSeconds = toUnixSeconds(event.timestamp);
-    const [tokenPriceUsd, wethPriceUsd] = await Promise.all([
-      getHistoricalPriceUsd(chain, event.tokenAddress, unixSeconds, poolIdForPricing),
-      getHistoricalPriceUsd(chain, wethAddr, unixSeconds, poolIdForPricing),
-    ]);
-    
-    const usdAmount = tokenAmount * tokenPriceUsd;
-    const ethAmount = wethPriceUsd > 0 ? usdAmount / wethPriceUsd : 0;
-    return { ethAmount, usdAmount, failed: false, usedFallbackDecimals };
-  } catch (err) {
-    console.error(
-      `[priceOneEvent FAILED] chain=${chain} tokenAddress=${event.tokenAddress} ` +
-      `wethAddr=${wethAddr} poolId=${event.poolId} txHash=${event.txHash} ` +
-      `logIndex=${event.logIndex} timestamp=${event.timestamp} :: ` +
-      `${err instanceof Error ? err.message : String(err)}`
-    );
-    return { ethAmount: 0, usdAmount: 0, failed: true, usedFallbackDecimals };
-  }
 }
 
-export async function getBeneficiaryFeesBreakdown(address: string): Promise<BeneficiaryFeesBreakdown> {
+// `bankrTokens` scopes the breakdown to fees earned on Bankr launches: the
+// indexer tracks EVERY Doppler/Clanker launch on the chain, and a wallet can
+// hold fee rights in non-Bankr launches too. It's the set of
+// bankrTokenKey(chain, token) for this wallet's tokens per Bankr's own API,
+// passed as a promise so the first indexer page can load while that resolves.
+// If it rejects (Bankr unavailable), the whole breakdown rejects - an
+// unscoped total would overstate earnings.
+export async function getBeneficiaryFeesBreakdown(
+  address: string,
+  bankrTokens: Promise<Set<string>>
+): Promise<BeneficiaryFeesBreakdown> {
+  // If an indexer call throws before bankrTokens is awaited, its rejection
+  // would otherwise go unhandled and crash the process (see the Promise.race
+  // note in wrappedService.fetchEarningsFromIndexer). The awaits below still
+  // see the rejection.
+  bankrTokens.catch(() => {});
+
   const bySource: Record<FeeSource, SourceEarnings> = {
     doppler: { totalEth: 0, totalUsd: 0, eventCount: 0, incomplete: false },
     clanker: { totalEth: 0, totalUsd: 0, eventCount: 0, incomplete: false },
   };
   const incompleteReasons: string[] = [];
 
-  const watchedPoolCache = new Map<string, boolean | null>();
+  const watchedPoolCache = new Map<string, WatchedPoolRow | null>();
 
-    async function getTokenIsToken0(chain: Chain, poolId: string): Promise<boolean | null> {
+  async function getWatchedPool(chain: Chain, poolId: string): Promise<WatchedPoolRow | null> {
     const key = `${chain}:${poolId}`;
     if (watchedPoolCache.has(key)) return watchedPoolCache.get(key)!;
     const t0 = Date.now();
     console.log(`[DEBUG-timing] fetchWatchedPool: start chain=${chain} poolId=${poolId}`);
     const pool = await fetchWatchedPool(chain, poolId);
     console.log(`[DEBUG-timing] fetchWatchedPool: done chain=${chain} poolId=${poolId} elapsedMs=${Date.now() - t0}`);
-    const resolved = pool?.tokenIsToken0 ?? null;
-    watchedPoolCache.set(key, resolved);
-    return resolved;
+    watchedPoolCache.set(key, pool);
+    return pool;
   }
 
   for (const chain of CHAINS) {
-    let fromBlock = "0";
-    for (;;) {
-      const tPage = Date.now();
-      console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: start chain=${chain} fromBlock=${fromBlock}`);
-      const page = await fetchIndexedFeeEventsPage(chain, address, fromBlock);
-      console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: done chain=${chain} fromBlock=${fromBlock} elapsedMs=${Date.now() - tPage} pageLen=${page.length}`);
-      if (page.length === 0) break;
+    try {
+      let cursor = cursorAfterBlock("0");
+      for (;;) {
+        const tPage = Date.now();
+        console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: start chain=${chain} fromBlock=${cursor.blockNumber}`);
+        const page = await fetchIndexedFeeEventsPage(chain, address, cursor);
+        console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: done chain=${chain} fromBlock=${cursor.blockNumber} elapsedMs=${Date.now() - tPage} pageLen=${page.length}`);
+        if (page.length === 0) break;
+
+        const scope = await bankrTokens;
 
       
-      // Pass 1: resolve pool-side (tokenIsToken0) serially per event, since
-      // it's cache-backed and needs to be settled before pricing. Events
-      // whose pool can't be resolved are marked incomplete here and
-      // excluded from the pricing batch below.
-      interface PricableEvent {
-        event: IndexedFeeEventRow;
-        source: FeeSource;
-        tokenIsToken0: boolean | null;
-      }
-      const pricable: PricableEvent[] = [];
-      for (const event of page) {
-        const source = eventTypeToSource(event.eventType);
-        if (!source) continue;
+        // Pass 1: resolve each event's WatchedPool serially, since
+        // it's cache-backed and needs to be settled before pricing. Events
+        // whose pool can't be resolved are marked incomplete here and
+        // excluded from the pricing batch below.
+        interface PricableEvent {
+          event: IndexedFeeEventRow;
+          source: FeeSource;
+          pool: WatchedPoolRow | null;
+        }
+        const pricable: PricableEvent[] = [];
+        for (const event of page) {
+          const source = eventTypeToSource(event.eventType);
+          if (!source) continue;
 
-        let tokenIsToken0: boolean | null = null;
-        if (event.poolId !== null) {
-          tokenIsToken0 = await getTokenIsToken0(chain, event.poolId);
-          if (tokenIsToken0 === null) {
+          const launchedToken = launchedTokenOf(event);
+          if (launchedToken === null) {
             bySource[source].incomplete = true;
-            incompleteReasons.push(`pool-unresolved: ${chain}:${event.poolId}`);
+            incompleteReasons.push(`launch-unattributed: ${chain}:${event.txHash}:${event.logIndex}`);
             continue;
           }
+          if (!scope.has(bankrTokenKey(chain, launchedToken))) continue; // not a Bankr launch
+
+          let pool: WatchedPoolRow | null = null;
+          if (event.poolId !== null) {
+            pool = await getWatchedPool(chain, event.poolId);
+            if (pool?.tokenIsToken0 == null) {
+              bySource[source].incomplete = true;
+              incompleteReasons.push(`pool-unresolved: ${chain}:${event.poolId}`);
+              continue;
+            }
+          }
+
+          pricable.push({ event, source, pool });
         }
 
-        pricable.push({ event, source, tokenIsToken0 });
-      }
+        // Pass 2: price up to 5 events concurrently instead of one at a
+        // time. GeckoTerminal's own MIN_REQUEST_INTERVAL_MS throttle still
+        // serializes GeckoTerminal calls underneath this, so raising
+        // concurrency here doesn't risk 429s - it just lets GoldRush calls
+        // and non-fallback events overlap instead of queueing behind them.
+        const pricedResults = await mapWithConcurrency(
+          pricable,
+          5,
+          ({ event, pool }) => priceOneEvent(chain, event, pool)
+        );
 
-      // Pass 2: price up to 5 events concurrently instead of one at a
-      // time. GeckoTerminal's own MIN_REQUEST_INTERVAL_MS throttle still
-      // serializes GeckoTerminal calls underneath this, so raising
-      // concurrency here doesn't risk 429s - it just lets GoldRush calls
-      // and non-fallback events overlap instead of queueing behind them.
-      const pricedResults = await mapWithConcurrency(
-        pricable,
-        5,
-        ({ event, tokenIsToken0 }) => priceOneEvent(chain, event, tokenIsToken0)
+        for (let i = 0; i < pricable.length; i++) {
+          const { event, source } = pricable[i];
+          const priced = pricedResults[i];
+
+          if (priced.failed) {
+            bySource[source].incomplete = true;
+            incompleteReasons.push(`pricing-failed: ${chain}:${event.txHash}:${event.logIndex}`);
+            continue;
+          }
+
+          if (priced.usedFallbackDecimals) {
+            bySource[source].incomplete = true;
+            incompleteReasons.push(
+              `decimals-fallback-used: ${chain}:${event.txHash}:${event.logIndex} ` +
+              `(token=${event.tokenAddress}, no RPC wired for chain=${chain} decimals lookup)`
+            );
+          }
+
+          bySource[source].totalEth += priced.ethAmount;
+          bySource[source].totalUsd += priced.usdAmount;
+          bySource[source].eventCount += 1;
+        }
+        cursor = cursorAfterEvent(page[page.length - 1]);
+        if (page.length < PAGE_SIZE) break;
+      }
+    } catch (err) {
+      // Chains fail independently: Robinhood's indexer (paused) erroring
+      // used to make this number unavailable for EVERY wallet, Base-only
+      // ones included. A failure only matters if this wallet has Bankr
+      // launches on that chain - then the whole breakdown still fails, so
+      // the caller keeps its last good cached value rather than storing a
+      // partial total as "ok". (Awaiting bankrTokens here also rethrows a
+      // Bankr-scope failure, which must never be swallowed.)
+      const scope = await bankrTokens;
+      const walletHasLaunchesHere = [...scope].some((key) => key.startsWith(`${chain}:`));
+      if (walletHasLaunchesHere) throw err;
+      console.warn(
+        `[getBeneficiaryFeesBreakdown] chain=${chain} unavailable, ignoring - wallet has no Bankr launches there: ` +
+        `${err instanceof Error ? err.message : String(err)}`
       );
-
-      for (let i = 0; i < pricable.length; i++) {
-        const { event, source } = pricable[i];
-        const priced = pricedResults[i];
-
-        if (priced.failed) {
-          bySource[source].incomplete = true;
-          incompleteReasons.push(`pricing-failed: ${chain}:${event.txHash}:${event.logIndex}`);
-          continue;
-        }
-
-        if (priced.usedFallbackDecimals) {
-          bySource[source].incomplete = true;
-          incompleteReasons.push(
-            `decimals-fallback-used: ${chain}:${event.txHash}:${event.logIndex} ` +
-            `(token=${event.tokenAddress}, no RPC wired for chain=${chain} decimals lookup)`
-          );
-        }
-
-        bySource[source].totalEth += priced.ethAmount;
-        bySource[source].totalUsd += priced.usdAmount;
-        bySource[source].eventCount += 1;
-      }
-      const last = page[page.length - 1];
-      fromBlock = last.blockNumber;
-      if (page.length < PAGE_SIZE) break;
     }
   }
+
+  // A wallet with no fee events never reaches the in-loop await - still
+  // settle it here so a Bankr failure surfaces as a rejection, not as an
+  // unhandled one.
+  await bankrTokens;
 
   const totalEth = bySource.doppler.totalEth + bySource.clanker.totalEth;
   const totalUsd = bySource.doppler.totalUsd + bySource.clanker.totalUsd;

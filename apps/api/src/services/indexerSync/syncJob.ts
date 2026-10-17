@@ -1,44 +1,46 @@
-import { fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
+import { cursorAfterBlock, cursorAfterEvent, fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
 import { getDecimals } from "./decimalsService";
 import { getHistoricalPriceUsd } from "../pricingService";
 import { indexedTokensRepository } from "../../repositories/indexedTokensRepository";
 import { checkAndNotifyWalletsForToken } from "./wrappedNotify";
 import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSummaryRepository";
+import { mapWithConcurrency } from "../../utils/mapWithConcurrency";
 import type { IndexedSwapRow } from "./envioClient";
 
 
-// Groups swaps within a page by hour bucket -- tokenAddress is invariant
-// within a single backfillToken() call (one token per call), so a
-// (token, hour) dedupe key collapses to just an hour-bucket key here.
-// getHistoricalPriceUsd's own cache is still keyed (chain, token, hour)
-// underneath -- this is a run-local dedupe on TOP of that, to avoid
-// awaiting the same effective lookup hundreds of times sequentially before
-// it would ever get cached.
-function hourBucketKey(unixSeconds: number): number {
-  return Math.floor(unixSeconds / 3600) * 3600;
+// Groups swaps within a page by UTC day -- the granularity prices actually
+// exist at: getHistoricalPriceUsd caches and fetches per day (GoldRush
+// daily price, price_cache keyed by day bucket). This used to group by
+// hour, so one page could fire up to 24 identical cache-missing lookups per
+// day at once - flooding the GoldRush limiter until its queue cap threw,
+// which recordFailure() then cached as a failed DAY, dropping every later
+// swap that day as "unpriced". tokenAddress is invariant within a single
+// backfillToken() call, so the day bucket alone is the dedupe key.
+function dayBucketKey(unixSeconds: number): number {
+  return Math.floor(unixSeconds / 86400) * 86400;
 }
 
-interface PriceGroup {
+export interface PriceGroup {
   swaps: IndexedSwapRow[];
   representativeTimestamp: number;
   representativePoolId: string;
 }
 
-// Fires all unique-bucket price lookups CONCURRENTLY via Promise.all,
-// rather than one at a time. getHistoricalPriceUsd already internally
-// bounds DeFiLlama concurrency to 25 in-flight (defiLlamaRateLimiter.ts)
-// and serializes GeckoTerminal fallback calls via its own module-level
-// throttle -- firing everything at once lets that existing infrastructure
-// do the real bounding instead of syncJob.ts awaiting sequentially and
-// leaving 24 of 25 available slots unused the whole time.
-async function priceGroupsConcurrently(
+// Bounded, not Promise.all over every bucket: the GoldRush limiter queues
+// excess calls and throws past its wait cap, so firing hundreds at once
+// turned queueing into failures. 8 matches the limiter's per-second rate.
+const PRICE_LOOKUP_CONCURRENCY = 8;
+
+export async function priceGroupsConcurrently(
   chain: string,
   tokenAddress: string,
   groups: Map<number, PriceGroup>,
 ): Promise<Map<number, number | null>> {
   const entries = Array.from(groups.entries());
-  const results = await Promise.all(
-    entries.map(async ([bucketKey, group]) => {
+  const results = await mapWithConcurrency(
+    entries,
+    PRICE_LOOKUP_CONCURRENCY,
+    async ([bucketKey, group]) => {
       try {
         const price = await getHistoricalPriceUsd(
           chain,
@@ -50,19 +52,19 @@ async function priceGroupsConcurrently(
       } catch {
         return [bucketKey, null] as const;
       }
-    }),
+    },
   );
   return new Map(results);
 }
 
-function groupSwapsByHour(swaps: IndexedSwapRow[]): Map<number, PriceGroup> {
+export function groupSwapsByDay(swaps: IndexedSwapRow[]): Map<number, PriceGroup> {
   const groups = new Map<number, PriceGroup>();
   for (const swap of swaps) {
     const ts = Math.floor(new Date(swap.timestamp).getTime() / 1000);
-    const key = hourBucketKey(ts);
+    const key = dayBucketKey(ts);
     let group = groups.get(key);
     if (!group) {
-      // representativePoolId: swaps in the same hour bucket for this token
+      // representativePoolId: swaps in the same day bucket for this token
       // could theoretically span >1 pool -- using the first swap's poolId
       // as representative for the whole bucket's GeckoTerminal fallback
       // lookup is a deliberate approximation, not hidden: flagging this
@@ -91,7 +93,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
     const decimals = await getDecimals(chain, tokenAddress);
     const divisor = 10 ** decimals;
 
-    let cursor = "0";
+    let cursor = cursorAfterBlock("0");
     let totalVolumeUsd = 0;
     let swapCount = 0;
     let excludedCount = 0;
@@ -108,7 +110,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
         if (blockNum > highestBlockSeen) highestBlockSeen = blockNum;
       }
 
-      const groups = groupSwapsByHour(page);
+      const groups = groupSwapsByDay(page);
       const pricesByBucket = await priceGroupsConcurrently(chain, tokenAddress, groups);
 
       for (const [bucketKey, group] of groups) {
@@ -127,7 +129,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
         }
       }
 
-      cursor = page[page.length - 1].blockNumber;
+      cursor = cursorAfterEvent(page[page.length - 1]);
       if (page.length < 1000) break;
 
       // Long-running backfill: touch last_refreshed_at as we go, not just
@@ -147,7 +149,7 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
     if (excludedCount > 0) {
       console.log(
         `[indexerSync] ${chain}:${tokenAddress} backfill complete with ${excludedCount} unpriced swap(s) ` +
-        `across ${excludedBucketCount} unpriced hour-bucket(s) excluded, ${swapCount} priced`,
+        `across ${excludedBucketCount} unpriced day-bucket(s) excluded, ${swapCount} priced`,
       );
     }
 
@@ -158,7 +160,11 @@ export async function backfillToken(chain: string, tokenAddress: string): Promis
       chainFullySynced ? "complete" : "in_progress",
     );
     if (chainFullySynced) {
-      await checkAndNotifyWalletsForToken(chain, tokenAddress);
+      // Outside the status-setting path on purpose: a notify failure must
+      // not fall into the catch below and re-mark a finished token 'failed'.
+      await checkAndNotifyWalletsForToken(chain, tokenAddress).catch((err) =>
+        console.error(`[indexerSync] notify after backfill failed for ${chain}:${tokenAddress}`, err),
+      );
     }
   } catch (err) {
     await indexedTokensRepository.setStatus(chain, tokenAddress, "failed");

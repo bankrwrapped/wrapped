@@ -12,7 +12,7 @@ import { bankrRateLimiter } from "../utils/bankrRateLimiter";
 import type { WrappedTradingVolume } from "@bankr-wrapped/shared";
 import { getBestAvailableVolume } from "./tradingVolumeEngine/getBestAvailableVolume";
 import type { TokenRef, ChainId, TokenSource } from "./tradingVolumeEngine/types";
-import { getBeneficiaryFeesBreakdown } from "./module8FeesBreakdown";
+import { bankrTokenKey, getBeneficiaryFeesBreakdown } from "./module8FeesBreakdown";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
@@ -59,6 +59,43 @@ function buildVolumeTokenRefs(wallet: string, tokens: WrappedTokenEntry[]): Toke
   return refs;
 }
 
+async function computeAndStoreTradingVolume(wallet: string, refs: TokenRef[]): Promise<WrappedTradingVolume> {
+  const result = await getBestAvailableVolume(wallet, refs);
+  const tradingVolume: WrappedTradingVolume = {
+    totalVolumeUsd: result.summary.totalVolumeUsd,
+    status: "ok",
+    isComplete: result.isComplete,
+    tokensTotal: result.tokensTotal,
+    tokensComplete: result.tokensComplete,
+    tokensInProgress: result.tokensInProgress,
+    tokensPending: result.tokensPending,
+    tokensFailed: result.tokensFailed,
+    updatedAt: new Date().toISOString(),
+  };
+  await wrappedCacheRepository.updateTradingVolume(wallet, tradingVolume);
+  return tradingVolume;
+}
+
+// Awaited (not fire-and-forget) recompute for a wallet's cached tokens, for
+// callers that must act on the fresh result - wrappedNotify, after a token's
+// backfill completes. Returns null if there's no cached profile, nothing to
+// compute, or a computation for this wallet is already in flight (that one
+// will store its own result).
+async function refreshTradingVolumeNow(wallet: string): Promise<WrappedTradingVolume | null> {
+  if (volumeComputationsInFlight.has(wallet)) return null;
+  const cached = await wrappedCacheRepository.findByWallet(wallet);
+  if (!cached) return null;
+  const refs = buildVolumeTokenRefs(wallet, cached.payload.tokens);
+  if (refs.length === 0) return null;
+
+  volumeComputationsInFlight.add(wallet);
+  try {
+    return await computeAndStoreTradingVolume(wallet, refs);
+  } finally {
+    volumeComputationsInFlight.delete(wallet);
+  }
+}
+
 function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]): void {
   if (volumeComputationsInFlight.has(wallet)) {
     console.log("[wrappedService] triggerTradingVolumeRefresh: already in flight for " + wallet + ", skipping");
@@ -73,20 +110,8 @@ function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]
   volumeComputationsInFlight.add(wallet);
   console.log("[wrappedService] triggerTradingVolumeRefresh: starting background compute for " + wallet + ", " + refs.length + " token(s)");
 
-  getBestAvailableVolume(wallet, refs)
-    .then(async (result) => {
-      const tradingVolume: WrappedTradingVolume = {
-        totalVolumeUsd: result.summary.totalVolumeUsd,
-        status: "ok",
-        isComplete: result.isComplete,
-        tokensTotal: result.tokensTotal,
-        tokensComplete: result.tokensComplete,
-        tokensInProgress: result.tokensInProgress,
-        tokensPending: result.tokensPending,
-        tokensFailed: result.tokensFailed,
-        updatedAt: new Date().toISOString(),
-      };
-      await wrappedCacheRepository.updateTradingVolume(wallet, tradingVolume);
+  computeAndStoreTradingVolume(wallet, refs)
+    .then((tradingVolume) => {
       console.log(
         "[wrappedService] triggerTradingVolumeRefresh: done for " + wallet +
         ", total=$" + tradingVolume.totalVolumeUsd + ", isComplete=" + tradingVolume.isComplete
@@ -103,39 +128,22 @@ function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]
 function shouldRefreshTradingVolume(
   tv: WrappedTradingVolume | undefined,
 ): boolean {
-  console.log(
-    "[TV DEBUG] shouldRefreshTradingVolume:",
-    JSON.stringify({
-      tv,
-      hasTv: Boolean(tv),
-      status: tv?.status,
-      isComplete: tv?.isComplete,
-      updatedAt: tv?.updatedAt,
-    }),
-  );
-
   // No volume result yet: compute it.
-  if (!tv || tv.status === "pending") {
-    console.log("[TV DEBUG] RESULT=true because missing/pending");
-    return true;
-  }
+  if (!tv || tv.status === "pending") return true;
 
   // Complete numbers are authoritative until something explicitly
   // invalidates them. Do not repeatedly recompute them.
-  if (tv.isComplete) {
-    console.log("[TV DEBUG] RESULT=false because complete");
-    return false;
-  }
+  if (tv.isComplete) return false;
 
-  // IMPORTANT:
-  // An incomplete result must be re-checked on the next user request.
-  // The previous 15-minute gate allowed a cold-start result to remain
-  // stale even after its backfill had already completed.
-  console.log(
-    "[TV DEBUG] RESULT=true because volume is incomplete; rechecking",
-  );
-
-  return true;
+  // Incomplete: recheck at most every VOLUME_RECHECK_MS. Rechecking on
+  // EVERY request (the previous behavior) re-ran the whole per-token
+  // waterfall on each page load for any wallet with a stuck token. The
+  // original reason for dropping this gate - a result staying stale after
+  // its backfill had completed - is now handled at the source:
+  // wrappedNotify recomputes and stores the volume when a token's backfill
+  // finishes.
+  const ageMs = Date.now() - Date.parse(tv.updatedAt);
+  return !(ageMs < VOLUME_RECHECK_MS);
 }
 
 // NEW — Module 8's real on-chain fee-event breakdown (indexed_fee_events,
@@ -169,7 +177,8 @@ function shouldRefreshTradingVolume(
 // this fix addresses the symptom (endpoint returns nothing), not
 // necessarily the underlying slowness inside module8FeesBreakdown.ts.
 async function fetchEarningsFromIndexer(
-  address: string
+  address: string,
+  bankrTokens: Promise<Set<string>>
 ): Promise<{ data: number; status: "ok" | "unavailable" }> {
   console.log("[wrappedService] fetchEarningsFromIndexer: start");
 
@@ -190,7 +199,7 @@ async function fetchEarningsFromIndexer(
   // requests. Fix: attach .catch() directly to breakdownPromise immediately,
   // independent of the race, so it can never be unhandled regardless of
   // which promise wins.
-  const breakdownPromise = getBeneficiaryFeesBreakdown(address).catch((err) => {
+  const breakdownPromise = getBeneficiaryFeesBreakdown(address, bankrTokens).catch((err) => {
     console.error(
       "[wrappedService] fetchEarningsFromIndexer: background breakdown rejected (may be after race already settled), err=" + String(err)
     );
@@ -427,13 +436,34 @@ function dedupeClankerAmounts(tokens: ClankerDedupeEntry[]): boolean[] {
   });
 }
 
+// The wallet's Bankr-launched tokens (creator + Please Bro sides), keyed by
+// bankrTokenKey - what scopes the indexer's on-chain earnings to Bankr. Rejects
+// if either Bankr call degraded: a partial list would silently drop real
+// Bankr earnings, so the indexer number is reported unavailable instead.
+async function bankrTokenScope(
+  creator: Promise<{ data: CreatorFeesResponse; status: "ok" | "unavailable" }>,
+  beneficiary: Promise<{ data: BeneficiaryFeesResponse; status: "ok" | "unavailable" }>
+): Promise<Set<string>> {
+  const [c, b] = await Promise.all([creator, beneficiary]);
+  if (c.status !== "ok" || b.status !== "ok") {
+    throw new Error("bankrTokenScope: Bankr creator/beneficiary fees unavailable, can't scope indexer earnings to Bankr launches");
+  }
+  const keys = new Set<string>();
+  for (const t of [...c.data.tokens, ...b.data.tokens]) {
+    keys.add(bankrTokenKey(t.chain, t.tokenAddress));
+  }
+  return keys;
+}
+
 async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayload> {
   console.log("[wrappedService] fetchFromBankr: start, wallet=" + match.evmAddress);
+  const creatorPromise = fetchCreatorFees(match.evmAddress);
+  const beneficiaryPromise = fetchBeneficiaryFees(match.evmAddress);
   const [creatorResult, beneficiaryResult, ethUsd, earningsFromIndexerResult] = await Promise.all([
-    fetchCreatorFees(match.evmAddress),
-    fetchBeneficiaryFees(match.evmAddress),
+    creatorPromise,
+    beneficiaryPromise,
     fetchEthUsdPrice(),
-    fetchEarningsFromIndexer(match.evmAddress),
+    fetchEarningsFromIndexer(match.evmAddress, bankrTokenScope(creatorPromise, beneficiaryPromise)),
   ]);
   console.log("[wrappedService] fetchFromBankr: all four resolved");
   const earningsFromIndexer = earningsFromIndexerResult.data;
@@ -743,6 +773,7 @@ async function searchHandles(query: string): Promise<BankrUserSearchResult[]> {
 
 export const wrappedService = {
   resolveWallet,
+  refreshTradingVolumeNow,
   fetchFromBankr,
   getWrapped,
   searchHandles,

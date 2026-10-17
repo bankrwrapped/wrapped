@@ -33,7 +33,14 @@ export function parseCookies(header: string | null): Record<string, string> {
     if (eq === -1) continue;
     const name = pair.slice(0, eq).trim();
     const value = pair.slice(eq + 1).trim();
-    if (name) out[name] = decodeURIComponent(value);
+    if (!name) continue;
+    // A malformed %-escape in ANY cookie on the request (ours or not) made
+    // decodeURIComponent throw and 500 the whole auth callback - skip it.
+    try {
+      out[name] = decodeURIComponent(value);
+    } catch {
+      continue;
+    }
   }
   return out;
 }

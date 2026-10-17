@@ -48,4 +48,43 @@ export const tokenVolumeSummaryRepository = {
       where chain = ${chain} and token_address = ${tokenAddress}
     `;
   },
+
+  // Incremental refresh commit: adds the new volume AND advances the
+  // checkpoint in one transaction, and only if the checkpoint is still the
+  // one this run started from. Two separate writes (addToTotal then
+  // updateCheckpoint) double-counted on a crash between them (the next run
+  // re-read the old checkpoint and re-added the same swaps), and two
+  // replicas refreshing the same token both added. Returns false if another
+  // run already advanced the checkpoint - this run's delta is discarded.
+  async addToTotalAndAdvanceCheckpoint(
+    chain: string,
+    tokenAddress: string,
+    additionalVolumeUsd: number,
+    additionalSwapCount: number,
+    expectedCheckpointBlock: string | null,
+    newCheckpointBlock: bigint,
+  ): Promise<boolean> {
+    return db.begin(async (tx) => {
+      const advanced = (await tx`
+        update indexed_tokens
+        set backfill_checkpoint_block = ${newCheckpointBlock.toString()},
+            last_refreshed_at = now()
+        where chain = ${chain} and token_address = ${tokenAddress}
+          and backfill_checkpoint_block is not distinct from ${expectedCheckpointBlock}
+        returning token_address
+      `) as { token_address: string }[];
+      if (advanced.length === 0) return false;
+
+      if (additionalSwapCount > 0) {
+        await tx`
+          update token_volume_summary
+          set total_volume_usd = total_volume_usd + ${additionalVolumeUsd},
+              swap_count = swap_count + ${additionalSwapCount},
+              last_updated_at = now()
+          where chain = ${chain} and token_address = ${tokenAddress}
+        `;
+      }
+      return true;
+    });
+  },
 };
