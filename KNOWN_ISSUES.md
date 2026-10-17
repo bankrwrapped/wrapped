@@ -115,6 +115,14 @@ precompute → 1–3 → 4, 6.
 
 ## Background jobs / process model
 
+- **[fixed]** Found by the real-Postgres tests: `updateTradingVolume` stored
+  `payload.tradingVolume` as a JSON *string* (`JSON.stringify(...)::jsonb` - Bun
+  binds the string as a JSON string scalar). Every background volume result in
+  production was a string, so `.status/.isComplete/.updatedAt` read `undefined`:
+  volume never read as complete, was recomputed every request, the ready
+  notification couldn't fire, and clients got a string. Fixed at the write,
+  normalized on read, and **`schema.sql` repairs existing rows** (idempotent).
+
 - **[open]** All job state is in process memory or on in-process timers:
   in-flight maps, the volume-running set, rate-limit buckets, the pricing
   failure cache, the refresh `running` flag, both 5-min sweeps.
@@ -205,7 +213,12 @@ precompute → 1–3 → 4, 6.
   migration tool.
   → Adds `token_volume_cache`, `backfill_started_at`, and `alter ... add column if not exists` catch-ups. Still no real migration tool.
 - **[partly fixed]** No type check in any build, no tests (only ad-hoc scripts), no CI.
-  → First real test added (`apps/api`: `bun run test`).
+  → Test suite: `bun run test` at the root (turbo) - 75 tests across api, web,
+  both indexers and the webhook. API files each run in their own process
+  (Bun's module mocks are process-wide) and with `--no-env-file` (Bun would
+  otherwise load the real `apps/api/.env`). DB tests run only with
+  `TEST_DATABASE_URL` pointing at a throwaway Postgres. Every fix was checked
+  by reverting it and confirming its test fails. Still no CI.
   → `bun run typecheck` (turbo) type-checks api + web, and `build` now depends on it,
   so the Railway deploy fails on type errors. Both pass today. Still no tests, no CI,
   and the indexer isn't covered (it needs `envio codegen` first).

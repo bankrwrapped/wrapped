@@ -2,11 +2,9 @@
 // a transient pricing failure must be retried, not silently excluded for
 // good, and a permanently unpriceable gap must eventually be accepted.
 // Envio, pricing and the repositories are mocked - no DB or network.
+import "../../test/setupEnv";
 import { test, expect, mock, beforeEach } from "bun:test";
 
-process.env.DATABASE_URL ??= "postgres://x:y@localhost:1/z";
-for (const k of ["GOLDRUSH_API_KEY","BASE_RPC_URL","ENVIO_GRAPHQL_URL_BASE","ENVIO_GRAPHQL_URL_ROBINHOOD","X_CLIENT_ID","X_CLIENT_SECRET","X_REDIRECT_URI"]) process.env[k] ??= "x";
-process.env.SESSION_ENC_KEY ??= "00".repeat(32);
 
 const DAY = 86400;
 let swaps: any[] = [];

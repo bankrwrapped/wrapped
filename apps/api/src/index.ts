@@ -214,6 +214,10 @@ startBackfillSweep("base");
 startRefreshSweep("base");
 
 console.log("[api] listening on http://localhost:" + PORT);
-fetch("https://api.bankr.bot/users/search?query=warmup", { signal: AbortSignal.timeout(25000) })
-  .then(() => console.log("[api] warmup fetch done"))
-  .catch(() => console.log("[api] warmup fetch failed (non-fatal)"));
+// Skipped under tests (bun test sets NODE_ENV=test): a test run must not
+// call the real Bankr API.
+if (process.env.NODE_ENV !== "test") {
+  fetch("https://api.bankr.bot/users/search?query=warmup", { signal: AbortSignal.timeout(25000) })
+    .then(() => console.log("[api] warmup fetch done"))
+    .catch(() => console.log("[api] warmup fetch failed (non-fatal)"));
+}

@@ -133,7 +133,7 @@ function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]
     });
 }
 
-function shouldRefreshTradingVolume(
+export function shouldRefreshTradingVolume(
   tv: WrappedTradingVolume | undefined,
 ): boolean {
   // No volume result yet: compute it.

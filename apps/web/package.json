@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "bun --no-env-file test ./test",
     "format": "prettier --write ."
   },
   "dependencies": {
