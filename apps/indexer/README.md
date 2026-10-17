@@ -33,3 +33,8 @@ GraphQL root fields are unprefixed: `IndexedSwap`, `IndexedFeeEvent`, `WatchedPo
 - **Backfill time:** a full backfill from the start block takes about 2 hours via HyperSync. After that the indexer streams in realtime.
 - **Changes need a re-index.** Any change to `EventHandlers.ts`, `schema.graphql` or `config.yaml` needs `codegen` and a fresh re-index before the running indexer reflects it.
 - **Old Clanker launches aren't covered.** Only Clanker v4 is indexed; v3-era launches are missing.
+
+## Starting on Railway
+
+The start command is `bun run scripts/start.ts`, not `envio start`. It runs `envio start`, which resumes where indexing left off. Only if Envio refuses because the stored data is incompatible (an older Envio version, or a config or schema change) does it start over, once, with `envio start -r`. A crash restart therefore resumes instead of wiping hours of progress. Set `ENVIO_AUTO_RESET=false` to make it stay down instead of starting over.
+

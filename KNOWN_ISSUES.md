@@ -4,10 +4,10 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
 
 ## Before the next deploy
 
-1. Run `apps/api/db/schema.sql` against production. It's idempotent. It adds the new columns, tables and indexes, and repairs `tradingVolume` values that were stored as strings (see *Fixed* below).
-2. Set `X_REDIRECT_URI=https://bankrwrapped.com/auth/x/callback` on Railway and register that callback URL in the X Developer Console.
-3. Set `WRAPPED_WEBHOOK_SECRET` on the API. "Wrapped ready" notifications are skipped while it's unset.
-4. Re-index the Base indexer (about 2 hours, plus Clanker v3.1 from block 27,733,337). This is required for the earnings fixes, the Clanker attribution, Clanker claims (the v4 check) and the Clanker v3.1 launches. **Held until v3.1 is merged, so it runs once.**
+1. ~~Run `apps/api/db/schema.sql` against production.~~ **Done 2026-10-17** (`pricing_attempts` present; 2 stringified `tradingVolume` rows repaired).
+2. ~~Set `X_REDIRECT_URI`~~ **Done.** Register `https://bankrwrapped.com/auth/x/callback` in the X Developer Console if not already.
+3. Set `WRAPPED_WEBHOOK_SECRET` to the same random value (`openssl rand -hex 32`) in two places: the API's Railway variables, and the webhook (`bankr webhooks env set WRAPPED_WEBHOOK_SECRET=…`). The webhook URL in `wrappedNotify.ts` is already the deployed one. If the two values differ, every notification is rejected as `invalid signature`.
+4. **Re-index the Base indexer: automatic on merge.** Since about 15:55 on 2026-10-17 the indexer has been crash-looping: `storage was initialized by an older envio version`. Envio won't resume that data, so nothing new has been indexed since. The new start wrapper (`apps/indexer/scripts/start.ts`) starts over **once** when Envio reports incompatible storage, and otherwise resumes, so Railway's automatic restarts keep filling the same data instead of wiping it. No manual `envio start -r` and no start-command edits. The re-index takes about 2 hours plus Clanker v3.1 from block 27,733,337. Until it catches up, indexer numbers show as unavailable or partial; displayed earnings (Bankr) are unaffected, and volume backfills don't mark tokens complete before the chain is synced.
 5. After deploying:
    - test sign-in on an iPhone (Safari)
    - check that client IPs vary in the API logs. If they don't, Railway is overwriting the worker's `X-Forwarded-For`, and every visitor shares one rate-limit bucket.
