@@ -19,7 +19,7 @@ const context = () => ({
   chain: { id: 8453 },
   KnownAsset: entity("KnownAsset"), KnownToken: entity("KnownToken"), WatchedPool: entity("WatchedPool"),
   IndexedSwap: entity("IndexedSwap"), IndexedFeeEvent: entity("IndexedFeeEvent"),
-  PendingFeeAttribution: entity("PendingFeeAttribution"),
+  PendingFeeAttribution: entity("PendingFeeAttribution"), ClankerV31Launch: entity("ClankerV31Launch"),
 });
 
 await import("../src/EventHandlers");
@@ -40,7 +40,7 @@ let ctx: ReturnType<typeof context>;
 
 beforeEach(() => {
   store = Object.fromEntries(
-    ["KnownAsset", "KnownToken", "WatchedPool", "IndexedSwap", "IndexedFeeEvent", "PendingFeeAttribution"].map((n) => [n, new Map()]),
+    ["KnownAsset", "KnownToken", "WatchedPool", "IndexedSwap", "IndexedFeeEvent", "PendingFeeAttribution", "ClankerV31Launch"].map((n) => [n, new Map()]),
   );
   ctx = context();
   logIndex = 0;
@@ -103,4 +103,37 @@ test("Doppler Release: beneficiary lowercased, launchedToken set, both fee amoun
   expect(row.recipient).toBe("0xbeneficiary");
   expect(row.launchedToken).toBe("0xdopplertoken");
   expect([row.amountToken0, row.amountToken1]).toEqual([11n, 22n]);
+});
+
+// ---- Clanker v3.1 ----
+const BANKR_DEPLOYER = "0x2112b8456AC07c15fA31ddf3Bf713E77716fF3F9";
+const v31Created = (positionId: bigint, msgSender: string, token = "0xV31Token") => ({
+  tokenAddress: token, creatorAdmin: "0xCreator", interfaceAdmin: "0xEea96d959963EaB488A3d4B7d5d347785cf1Eab8",
+  creatorRewardRecipient: "0xCreator", interfaceRewardRecipient: "0xBankr", positionId, name: "Tok", symbol: "TOK",
+  startingTickIfToken0IsNewToken: 0, metadata: "", amountTokensBought: 0n, vaultDuration: 0n, vaultPercentage: 0, msgSender,
+});
+const v31Claimed = (lpTokenId: bigint, creatorReward0: bigint, creatorReward1: bigint) => ({
+  lpTokenId, creatorRecipient: "0xCreatorPayee", interfaceRecipient: "0xBankr", teamRecipient: "0xClanker",
+  token0: "0xV31Token", token1: WETH, creatorReward0, creatorReward1,
+  interfaceReward0: 9n, interfaceReward1: 9n, teamReward0: 9n, teamReward1: 9n,
+});
+
+test("v3.1: only launches sent by Bankr's deployer are recorded", async () => {
+  await emit("ClankerV31.TokenCreated", v31Created(7n, BANKR_DEPLOYER));
+  await emit("ClankerV31.TokenCreated", v31Created(8n, "0xE625F744f130D84542DD5e131C5Ea66a29887Af9", "0xNotBankr"));
+  expect([...store.ClankerV31Launch.keys()]).toEqual(["base:7"]);
+  expect(store.ClankerV31Launch.get("base:7")).toMatchObject({ tokenAddress: "0xv31token", creatorAdmin: "0xcreator", symbol: "TOK" });
+});
+
+test("v3.1 collect: the creator's share of both tokens, attributed to the launch; non-Bankr positions ignored", async () => {
+  await emit("ClankerV31.TokenCreated", v31Created(7n, BANKR_DEPLOYER));
+  await emit("ClankerV31LpLocker.ClaimedRewards", v31Claimed(7n, 40n, 4n));
+  await emit("ClankerV31LpLocker.ClaimedRewards", v31Claimed(99n, 40n, 4n)); // no Bankr launch for position 99
+  await emit("ClankerV31LpLocker.ClaimedRewards", v31Claimed(7n, 0n, 0n)); // nothing for the creator
+  const rows = [...store.IndexedFeeEvent.values()];
+  expect(rows.length).toBe(1);
+  expect(rows[0]).toMatchObject({
+    eventType: "ClankerV31ClaimedRewards", recipient: "0xcreatorpayee", launchedToken: "0xv31token",
+    tokenAddress: "0xv31token", tokenAddress1: WETH, amountToken0: 40n, amountToken1: 4n,
+  });
 });

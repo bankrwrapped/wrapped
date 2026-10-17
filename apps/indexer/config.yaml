@@ -121,29 +121,68 @@ contracts:
           transaction_fields:
             - hash
 
+  # Clanker v3.1 - Bankr launched through it from 2025-03-18 to about
+  # July 2025 (then v4, then Doppler). Uniswap V3 pools, no fee locker: fees
+  # sit in the LP position until anyone calls LpLockerv2.collectRewards,
+  # which pays creator / interface / Clanker directly and emits
+  # ClaimedRewards. Signatures from clanker-devco/v3.1-contracts
+  # (IClanker.sol, ILPLockerv2.sol), decoded against real Bankr deploy txs.
+  - name: ClankerV31
+    handler: src/EventHandlers.ts
+    events:
+      - event: "TokenCreated(address indexed tokenAddress, address indexed creatorAdmin, address indexed interfaceAdmin, address creatorRewardRecipient, address interfaceRewardRecipient, uint256 positionId, string name, string symbol, int24 startingTickIfToken0IsNewToken, string metadata, uint256 amountTokensBought, uint256 vaultDuration, uint8 vaultPercentage, address msgSender)"
+        name: TokenCreated
+
+  - name: ClankerV31LpLocker
+    handler: src/EventHandlers.ts
+    events:
+      - event: "ClaimedRewards(uint256 indexed lpTokenId, address indexed creatorRecipient, address indexed interfaceRecipient, address teamRecipient, address token0, address token1, uint256 creatorReward0, uint256 creatorReward1, uint256 interfaceReward0, uint256 interfaceReward1, uint256 teamReward0, uint256 teamReward1)"
+        name: ClaimedRewards
+        field_selection:
+          transaction_fields:
+            - hash
+
 chains:
   - id: 8453 # Base mainnet
-    start_block: 28415516 # Airlock's real deployment block (2026-08-07, on-chain confirmed) — see §2 OQ1
+    # The Clanker v3.1 factory's deployment block (on-chain, 2026-10-17). Every
+    # other contract keeps its own start_block below (Airlock's deployment,
+    # 28415516 - the previous chain start), so nothing else is replayed from
+    # this earlier block. All Clanker v4 contracts deployed after 28415516.
+    start_block: 27733337
     contracts:
       - name: Airlock
+        start_block: 28415516
         address:
           - "0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12"
       - name: PoolManager
+        start_block: 28415516
         address:
           - "0x498581fF718922c3f8e6A244956aF099B2652b2b"
       - name: StreamableFeesLockerV2
+        start_block: 28415516
         address:
           - "0xce3212e6536f33cd6fbfee265224131353ca3d47"
       - name: Clanker
+        start_block: 28415516
         address:
           - "0xE85A59c628F7d27878ACeB4bf3b35733630083a9"
       - name: ClankerFeeLocker
+        start_block: 28415516
         address:
           - "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68"
       - name: ClankerLpLocker
+        start_block: 28415516
         address:
           - "0x29d17C1A8D851d7d4cA97FAe97AcAdb398D9cCE0" # ClankerLpLocker
           - "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496" # ClankerLpLockerFeeConversion
+      - name: ClankerV31
+        start_block: 27733337 # factory deployment
+        address:
+          - "0x2A787b2362021cC3eEa3C24C4748a6cD5B687382"
+      - name: ClankerV31LpLocker
+        start_block: 27733342 # LpLockerv2 deployment
+        address:
+          - "0x33e2Eda238edcF470309b8c6D228986A1204c8f9"
 
   # Robinhood Chain (4663) intentionally omitted — see header note. Splice
   # in Module 3's real, current chain block here once produced; do not

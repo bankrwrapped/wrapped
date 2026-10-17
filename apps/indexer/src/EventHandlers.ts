@@ -212,6 +212,7 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async 
     recipient: undefined,
     launchedToken: resolved.tokenAddress,
     amountToken0: event.params.fees0,
+    tokenAddress1: undefined,
     amountToken1: event.params.fees1,
     blockNumber: BigInt(event.block.number),
     txHash: event.transaction.hash,
@@ -238,6 +239,7 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Release" }, async 
     recipient: normalizeAddress(event.params.beneficiary), // lowercased like every other address here, so the API's recipient filter matches
     launchedToken: resolved.tokenAddress,
     amountToken0: event.params.fees0,
+    tokenAddress1: undefined,
     amountToken1: event.params.fees1,
     blockNumber: BigInt(event.block.number),
     txHash: event.transaction.hash,
@@ -305,6 +307,7 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "StoreTokens" }, async ({
     recipient: feeOwner,
     launchedToken: undefined, // set by ClaimedRewards later in this tx
     amountToken0: event.params.amount,
+    tokenAddress1: undefined,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),
     txHash: event.transaction.hash,
@@ -365,6 +368,7 @@ function setClankerClaim(
     recipient: normalizeAddress(event.params.feeOwner),
     launchedToken: undefined,
     amountToken0: event.params.amountClaimed,
+    tokenAddress1: undefined,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),
     txHash: event.transaction.hash,
@@ -379,4 +383,58 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({
 
 indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokensPermissioned" }, async ({ event, context }) => {
   setClankerClaim(context, event, "ClaimTokensPermissioned");
+});
+
+// ---- Clanker v3.1 (Bankr launches 2025-03-18 to about July 2025) ----
+
+// Bankr's deployer for every Clanker launch it made (140,541 per Clanker's
+// API, v3.1 then v4). Launches with any other msgSender aren't Bankr's, even
+// when they name Bankr's interface admin.
+const BANKR_CLANKER_DEPLOYERS = new Set(["0x2112b8456ac07c15fa31ddf3bf713e77716ff3f9"]);
+
+indexer.onEvent({ contract: "ClankerV31", event: "TokenCreated" }, async ({ event, context }) => {
+  if (!BANKR_CLANKER_DEPLOYERS.has(normalizeAddress(event.params.msgSender))) return;
+  const chain = chainName(context.chain.id);
+  context.ClankerV31Launch.set({
+    id: `${chain}:${event.params.positionId}`,
+    chain,
+    positionId: event.params.positionId,
+    tokenAddress: normalizeAddress(event.params.tokenAddress),
+    creatorAdmin: normalizeAddress(event.params.creatorAdmin),
+    creatorRewardRecipient: normalizeAddress(event.params.creatorRewardRecipient),
+    name: event.params.name,
+    symbol: event.params.symbol,
+    blockNumber: BigInt(event.block.number),
+    timestamp: new Date(event.block.timestamp * 1000),
+  });
+});
+
+// A collect pays the creator's share of both pool tokens at once - fees
+// earned and paid out in the same step, so this is the v3.1 equivalent of
+// Doppler's Release. Only Bankr launches (a ClankerV31Launch exists for the
+// position) and only the creator's share: interface (Bankr) and team
+// (Clanker) shares aren't anyone's Wrapped earnings.
+indexer.onEvent({ contract: "ClankerV31LpLocker", event: "ClaimedRewards" }, async ({ event, context }) => {
+  const chain = chainName(context.chain.id);
+  const launch = await context.ClankerV31Launch.get(`${chain}:${event.params.lpTokenId}`);
+  if (!launch) return;
+  const { creatorReward0, creatorReward1 } = event.params;
+  if (creatorReward0 === 0n && creatorReward1 === 0n) return;
+
+  context.IndexedFeeEvent.set({
+    id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
+    chain,
+    poolId: undefined,
+    tokenAddress: normalizeAddress(event.params.token0),
+    tokenAddress1: normalizeAddress(event.params.token1),
+    eventType: "ClankerV31ClaimedRewards",
+    recipient: normalizeAddress(event.params.creatorRecipient),
+    launchedToken: launch.tokenAddress,
+    amountToken0: creatorReward0,
+    amountToken1: creatorReward1,
+    blockNumber: BigInt(event.block.number),
+    txHash: event.transaction.hash,
+    logIndex: event.logIndex,
+    timestamp: new Date(event.block.timestamp * 1000),
+  });
 });
