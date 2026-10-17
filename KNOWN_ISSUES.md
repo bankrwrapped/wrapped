@@ -20,13 +20,28 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
   - **Expect:** the sweep picks up reset tokens after 15 minutes idle. While they're pending, affected wallets show volume as incomplete. The sweep now skips a tick while the previous one is still running, so a large backlog stays at 3 concurrent backfills.
 - **After the re-index, check for `StoreTokens` rows with a null `launchedToken`.** The API reports these as `launch-unattributed`. *Unverified:* the attribution reads, within the same transaction, what an earlier event wrote, and Envio's preload ordering has caused problems in this repo before.
 
+## Data accuracy (verified 2026-10-17 against live Bankr API, prod and on-chain)
+
+Checked on the leaderboard's top wallets. Our arithmetic matched Bankr's raw per-token data exactly; the problems were in what that data measures. **Fixed on this branch** unless marked open:
+
+- **BNKR- and stock-quoted fees counted as 0 (fixed).** `wethAmount` only read a "WETH" label, but many Doppler pools quote in BNKR (`0x22af33fe…`) or tokenized stocks. The quote side is now valued whatever it is, at current prices (`bankrFeeValuation.ts`, `currentPrices.ts`). Example: 0xDeployer had about 2.8 ETH of such fees uncounted, against about 4.5 ETH counted. (An earlier estimate of 7.15 ETH was wrong: it counted a launched token that is itself *named* "BNKR". The valuation identifies the quote side by position, so that case is handled and tested.)
+- **Phantom Clanker claimable from Bankr (fixed in our numbers; worth reporting to Bankr).** About 0.0677 WETH appears on every Clanker token, across at least 10 unrelated wallets. ClankerFeeLocker `availableFees(wallet, WETH)` returns 0 to 0.0006 for them. Bankr's Clanker claimable is now ignored and the on-chain balance is read once per wallet (`clankerFeeLocker.ts`). The skill's native "unclaimed fees" lookup probably still shows the phantom; the skill now says to state Clanker as one wallet-level figure.
+- **90-day figures presented as lifetime (fixed where Bankr allows).** `?days=` is capped at 90. `dailyEarnings` is WETH *claimed* per day. Bankr's `lifetimeEarnedWeth` and `lifetimeBestDay` are lifetime Doppler WETH claims: they match the daily series exactly where they overlap, and exclude Clanker. The creator total and best day now use them, never dropping below the 90-day figures when Bankr's lifetime lags. **Open:** Please Bro, claim count and streak have no lifetime source and stay 90 days, and per-token figures stay 90 days + claimable, so they can sum to less than the creator total.
+- **The token list is NOT limited by `?days=90`**: same count at 30, 90 and 365.
+- **Stale leaderboard (fixed).** `leaderboardRefresh.ts` re-fetches every 30 minutes the top 50 rows older than an hour, plus the 25 stalest rows overall.
+- **One shared rate-limit bucket for the bot (fixed, needs config).** A request with a key from `WRAPPED_TRUSTED_CLIENT_KEYS` in `X-Wrapped-Client-Key` gets a 600/min bucket per key. Key only: an IP allowlist could be spoofed via `X-Forwarded-For`. **Open:** Bankr has to send the header from the bot's runtime.
+- **Open: unpriced quote assets.** A quote asset with no known address and no indexer pool record, or no price, counts as 0 and sets `meta.earningsPartial`. That's mostly Robinhood stock tokens on the Please Bro side when the indexer's pool lookup is unavailable.
+
 ## Goal: the indexer as the source of truth
+
+**Unclaimed fees (fixed on this branch):** the indexer counts Doppler `Release`, which fires only when fees are *paid out*, so on its own it missed every unclaimed fee. jessepollak showed 0.00 ETH against 2.07 on Bankr, all of it unclaimed. The indexer number now adds each Doppler pool's claimable fees, both sides like `Release`, from Bankr's per-pool amounts at current prices. Clanker needs nothing extra, because `StoreTokens` accrual already includes unclaimed fees. Anything unpriced marks it incomplete, so the switch falls back to Bankr. Still compare before switching: the claimable part comes from Bankr's data, so the two numbers aren't fully independent.
+
 
 The indexers exist to give users the most accurate earnings number, but that number doesn't reach users yet. `earnings.totalEth`, the leaderboard and the site all come from Bankr's creator-fees / beneficiary-fees API. `earningsFromIndexer` is computed and stored, but nothing displays it.
 
 Built and waiting on the re-index; the switch is **off**.
 
-1. **Compare (ready):** after the re-index, run `apps/api/scripts/diagnostics/compare-earnings.ts --top 25` (or with known handles; add `--tokens` for per-token detail). Expect the indexer's figure to be at or above Bankr's. Bankr's is the WETH side only and uses `?days=90`, while the indexer counts both sides of Doppler fees over the full history. Wallets well below Bankr, or marked incomplete, are the ones to look at.
+1. **Compare (ready):** after the re-index, run `apps/api/scripts/diagnostics/compare-earnings.ts --top 25` (or with known handles; add `--tokens` for per-token detail). Expect the indexer's figure to be at or above Bankr's. Both now include claimable fees, but the indexer also counts the launched-token side of Doppler fees, which Bankr's figure leaves out. Wallets well below Bankr, or marked incomplete, are the ones to look at.
 2. **Switch (built, off):** set `EARNINGS_SOURCE=indexer` on the API. The per-token, creator, Please Bro and total figures then all come from the indexer, but only when its number is `ok` **and** complete. Otherwise the wallet falls back to Bankr. A wallet that was already showing the indexer number keeps its last indexer result rather than flipping back. The leaderboard follows, since it ranks by `earnings.totalEth`. Claimable, daily earnings, best day, streak and claim count stay Bankr's, because the indexer doesn't know what's unclaimed.
 3. **Cross-check (built):** every payload stores `earningsFromBankr` next to `earningsFromIndexer`, plus `meta.earningsSource`. The API logs `earnings disagreement` when they differ by 20% and at least 0.01 ETH.
 
@@ -39,7 +54,7 @@ Bankr's API stays the source of *which tokens are Bankr launches*. Nothing on-ch
 ### Needs a decision
 - **"Only your own Wrapped" is enforced only by the skill prompt.** `/api/wrapped/:handle` is public and never checks the session. Enforcing it means requiring sign-in, plus a separate authenticated path for the Bankr bot.
 - **Unused X refresh tokens.** `offline.access` is requested and refresh tokens are stored encrypted, but `refreshAccessToken` is never called, and there's no logout route (`revoke` is unused). Either use them or stop requesting and storing them.
-- **A "year" recap built on 90 days of data.** Bankr data is fetched with `?days=90`, so best day, streak and daily earnings cover 90 days. It's worth checking whether Bankr accepts a longer window.
+- **A "year" recap built on 90 days of data.** Bankr caps `?days=` at 90 (verified), so best day, streak and claims cover 90 days. The skill now says so. Fixing it properly means Bankr's lifetime fields, or our own indexer history.
 - **Percentile pool.** "Top X%" is out of the people who looked themselves up, not all Bankr launchers. Precomputing would fix this (see the roadmap).
 
 ### Architecture (redesign)
@@ -50,7 +65,6 @@ Bankr's API stays the source of *which tokens are Bankr launches*. Nothing on-ch
 
 ### Coverage and data
 - **Old Clanker launches:** only Clanker v4 is indexed, so v3-era Bankr Clanker launches are missing.
-- **Bankr's token list:** *unverified* whether `?days=90` also limits *which tokens* Bankr returns. If it does, older Bankr launches drop out of the on-chain scope.
 - **Robinhood indexer** is paused pending a paid RPC tier (see `apps/indexer-robinhood`).
 - **Refresh retry window:** a refresh retries unpriced swaps every 5 minutes, so its 5 attempts span about 25 minutes, versus about 75 for backfill.
 
