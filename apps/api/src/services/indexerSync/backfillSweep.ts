@@ -41,16 +41,36 @@ async function reconcileStuckBackfills(chain: string): Promise<void> {
   }
 }
 
+// setInterval doesn't wait for the previous tick. One tick works through
+// every candidate SWEEP_CONCURRENCY at a time, so with a large backlog (a
+// mass re-backfill) it outlasts the interval - without this guard each new
+// tick started another batch loop over the same backlog and the effective
+// concurrency grew by SWEEP_CONCURRENCY every interval.
+const sweepsRunning = new Set<string>();
+
+export async function runBackfillSweep(chain: string): Promise<void> {
+  if (sweepsRunning.has(chain)) {
+    console.warn(`[backfillSweep] previous sweep still running for chain=${chain}; skipping`);
+    return;
+  }
+  sweepsRunning.add(chain);
+  try {
+    await reconcileStuckBackfills(chain);
+  } finally {
+    sweepsRunning.delete(chain);
+  }
+}
+
 export function startBackfillSweep(chain: string): void {
   // Run once immediately on boot -- this is what actually recovers
   // WHYNOT and the rest of the currently-stuck tokens without waiting a
   // full 5 minutes for the first tick.
-  reconcileStuckBackfills(chain).catch((err) =>
+  runBackfillSweep(chain).catch((err) =>
     console.error(`[backfillSweep] initial sweep failed for chain=${chain}`, err),
   );
 
   setInterval(() => {
-    reconcileStuckBackfills(chain).catch((err) =>
+    runBackfillSweep(chain).catch((err) =>
       console.error(`[backfillSweep] periodic sweep failed for chain=${chain}`, err),
     );
   }, SWEEP_INTERVAL_MS);

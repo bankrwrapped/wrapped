@@ -14,9 +14,10 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
 
 ## Next up
 
-- **Re-backfill every token under the new volume logic (decided).** The unpriced-swap retry only affects new runs. Tokens already marked `complete` keep swaps that were dropped in the past.
-  - **Plan:** a one-off script that resets every `complete` token to `pending` with `pricing_attempts = 0`, so the sweep re-processes it. Most prices come from `price_cache`, so it's cheap.
-  - **Order:** run it after `schema.sql` has been applied.
+- **Re-backfill every token under the new volume logic (decided, script ready).** The unpriced-swap retry only affects new runs. Tokens already marked `complete` keep swaps that were dropped in the past.
+  - **Script:** `apps/api/scripts/maintenance/rebackfill-complete-tokens.ts` resets `complete` Base tokens to `pending` with `pricing_attempts = 0`. It's a dry run by default; pass `--apply`, and optionally `--limit N` to go in waves. Backfill rescans from block 0 and overwrites the total, so nothing is double-counted, and nobody gets a second "Wrapped ready" notification.
+  - **Order:** after `schema.sql` is applied **and** the new API is deployed (the old code would drop the same swaps again). The script refuses to run without the `pricing_attempts` column.
+  - **Expect:** the sweep picks up reset tokens after 15 minutes idle. While they're pending, affected wallets show volume as incomplete. The sweep now skips a tick while the previous one is still running, so a large backlog stays at 3 concurrent backfills.
 - **After the re-index, check for `StoreTokens` rows with a null `launchedToken`.** The API reports these as `launch-unattributed`. *Unverified:* the attribution reads, within the same transaction, what an earlier event wrote, and Envio's preload ordering has caused problems in this repo before.
 - **CI:** GitHub Actions running `bun run typecheck` and `bun run test` with a Postgres service for the DB tests.
 
