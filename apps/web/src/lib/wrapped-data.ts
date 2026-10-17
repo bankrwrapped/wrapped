@@ -1,21 +1,18 @@
-export type Chain = "base" | "robinhood";
+// API contract types come straight from packages/shared - the same types the
+// API builds its responses from. This file used to hand-copy them, and the
+// copy had already drifted (no tradingVolume, no earningsFromIndexer).
+import type {
+  Chain,
+  FeesFetchStatus,
+  WrappedCacheRow,
+  WrappedTokenEntry,
+} from "@bankr-wrapped/shared";
 
-export type TokenEntry = {
-  tokenAddress: string;
-  name: string;
-  symbol: string;
-  chain: Chain;
-  // Raw ETH earned on this token - no USD conversion, displayed as-is.
-  feesEarnedEth: number;
-  // Raw source string from Bankr's API ("doppler" | "clanker", loosely
-  // typed to match the backend contract). Not currently rendered anywhere
-  // in the UI - added to keep this type in sync with WrappedTokenEntry per
-  // this file's own "must match" contract, available if a future UI need
-  // wants to show it (e.g. a Doppler/Clanker badge).
-  source: string;
-};
+export type { Chain, FeesFetchStatus };
 
-export type FeesFetchStatus = "ok" | "unavailable";
+// feesEarnedEth is raw ETH, displayed as-is. source ("doppler" | "clanker")
+// isn't rendered yet - available for e.g. a Doppler/Clanker badge.
+export type TokenEntry = WrappedTokenEntry;
 
 export type WrappedProfile = {
   handle: string;
@@ -53,43 +50,7 @@ export class WrappedNotFoundError extends Error {
   }
 }
 
-type ApiWrappedCacheRow = {
-  walletAddress: string;
-  username: string;
-  payload: {
-    user: {
-      handle: string;
-      displayName: string;
-      platform: "x" | "farcaster";
-      avatar: string;
-      wallet: string;
-    };
-    tokens: TokenEntry[];
-    pleaseBroTokens: TokenEntry[];
-    earnings: {
-      creatorEarnings: number;
-      pleaseBroEarnings: number;
-      total: number;
-      creatorEarningsEth: number;
-      pleaseBroEarningsEth: number;
-      totalEth: number;
-    };
-    claimable: { unclaimed: number; unclaimedEth: number };
-    bestDay: { date: string; eth: number } | null;
-    dailyEarnings: { date: string; eth: number }[];
-    claimCount: number;
-    longestStreakDays: number;
-    summary: { tokensLaunched: number; hasActivity: boolean };
-    meta: {
-      creatorFeesStatus: FeesFetchStatus;
-      beneficiaryFeesStatus: FeesFetchStatus;
-    };
-  };
-  updatedAt: string;
-  rank: number;
-  totalUsers: number;
-  percentile: number;
-};
+type ApiWrappedCacheRow = WrappedCacheRow;
 
 // Single source for the API base - use-auth.ts imports this too. Defaults to
 // "" (same origin): src/server.ts proxies /api/* and /auth/* to the Railway

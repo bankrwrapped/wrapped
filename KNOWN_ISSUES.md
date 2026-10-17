@@ -127,11 +127,12 @@ precompute → 1–3 → 4, 6.
   `tradingVolume` read at cache-check time. A background
   `updateTradingVolume` that lands in between is overwritten.
   → On conflict, upsert keeps the row's current `tradingVolume`; only the background job writes it.
-- **[open]** The request path does too much: a Bankr search on *every*
+- **[partly fixed]** The request path does too much: a Bankr search on *every*
   request (handle→wallet isn't cached, so cache hits still use up Bankr's rate
   limit), and fee-event paging plus pricing inside the HTTP request. Timeouts
   are nested (25s inside 45s), and when the race times out, the work keeps
   running.
+  → handle→wallet is now cached in-process (10 min; not-found 2 min), so cache hits no longer call Bankr. The in-request fee paging/pricing remains (redesign).
 
 ## Notifications
 
@@ -201,13 +202,16 @@ precompute → 1–3 → 4, 6.
   `create table if not exists` never adds new columns. There is no
   migration tool.
   → Adds `token_volume_cache`, `backfill_started_at`, and `alter ... add column if not exists` catch-ups. Still no real migration tool.
-- **[open]** No type check in any build (`bun build` doesn't type-check), no
-  tests (only ad-hoc scripts), no CI.
-- **[open]** The web app hand-copies the payload type instead of importing
+- **[partly fixed]** No type check in any build, no tests (only ad-hoc scripts), no CI.
+  → `bun run typecheck` (turbo) type-checks api + web, and `build` now depends on it,
+  so the Railway deploy fails on type errors. Both pass today. Still no tests, no CI,
+  and the indexer isn't covered (it needs `envio codegen` first).
+- **[fixed]** The web app hand-copies the payload type instead of importing
   `@bankr-wrapped/shared`, and it's already behind.
+  → `wrapped-data.ts` now imports the types from `@bankr-wrapped/shared`.
 - **[fixed, uncommitted]** Mismatched API defaults: `use-auth.ts` uses
   `localhost:4000`, `wrapped-data.ts` uses the Railway prod URL.
-- **[open]** Debug logging in the hot path (`[TV DEBUG]`, `[DEBUG-timing]`),
+- **[partly fixed]** Debug logging in the hot path (`[TV DEBUG]`, `[DEBUG-timing]` — both removed),
   and console-only observability: no metrics or alerts, and "unavailable"
   degradations are invisible.
 - **[open]** README drift (`indexer-base/`, `ENVIO_GRAPHQL_URL`). Both READMEs are

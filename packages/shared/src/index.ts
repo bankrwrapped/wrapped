@@ -93,7 +93,7 @@ export interface BeneficiaryFeesResponse {
   tokens: BeneficiaryFeeTokenEntry[];
 }
 
-// ---- Frontend contract - must match apps/web/src/lib/wrapped-data.ts ----
+// ---- Frontend contract - imported directly by apps/web/src/lib/wrapped-data.ts ----
 
 export interface WrappedTokenEntry {
   tokenAddress: string;
