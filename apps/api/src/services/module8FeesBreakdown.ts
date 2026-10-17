@@ -64,6 +64,9 @@ export interface BeneficiaryFeesBreakdown {
   bySource: Record<FeeSource, SourceEarnings>;
   totalEth: number;
   totalUsd: number;
+  // ETH per launched token, keyed by bankrTokenKey - lets the caller show
+  // per-token and creator/Please Bro figures that add up to totalEth.
+  byToken: Record<string, number>;
   incomplete: boolean;
   incompleteReasons: string[];
 }
@@ -238,6 +241,7 @@ export async function getBeneficiaryFeesBreakdown(
     clanker: { totalEth: 0, totalUsd: 0, eventCount: 0, incomplete: false },
   };
   const incompleteReasons: string[] = [];
+  const byToken: Record<string, number> = {};
 
   const watchedPoolCache = new Map<string, WatchedPoolRow | null>();
 
@@ -267,6 +271,7 @@ export async function getBeneficiaryFeesBreakdown(
           event: IndexedFeeEventRow;
           source: FeeSource;
           pool: WatchedPoolRow | null;
+          tokenKey: string;
         }
         const pricable: PricableEvent[] = [];
         for (const event of page) {
@@ -279,7 +284,8 @@ export async function getBeneficiaryFeesBreakdown(
             incompleteReasons.push(`launch-unattributed: ${chain}:${event.txHash}:${event.logIndex}`);
             continue;
           }
-          if (!scope.has(bankrTokenKey(chain, launchedToken))) continue; // not a Bankr launch
+          const tokenKey = bankrTokenKey(chain, launchedToken);
+          if (!scope.has(tokenKey)) continue; // not a Bankr launch
 
           let pool: WatchedPoolRow | null = null;
           if (event.poolId !== null) {
@@ -291,7 +297,7 @@ export async function getBeneficiaryFeesBreakdown(
             }
           }
 
-          pricable.push({ event, source, pool });
+          pricable.push({ event, source, pool, tokenKey });
         }
 
         // Pass 2: price up to 5 events concurrently instead of one at a
@@ -306,7 +312,7 @@ export async function getBeneficiaryFeesBreakdown(
         );
 
         for (let i = 0; i < pricable.length; i++) {
-          const { event, source } = pricable[i];
+          const { event, source, tokenKey } = pricable[i];
           const priced = pricedResults[i];
 
           if (priced.failed) {
@@ -326,6 +332,7 @@ export async function getBeneficiaryFeesBreakdown(
           bySource[source].totalEth += priced.ethAmount;
           bySource[source].totalUsd += priced.usdAmount;
           bySource[source].eventCount += 1;
+          byToken[tokenKey] = (byToken[tokenKey] ?? 0) + priced.ethAmount;
         }
         cursor = cursorAfterEvent(page[page.length - 1]);
         if (page.length < PAGE_SIZE) break;
@@ -362,6 +369,7 @@ export async function getBeneficiaryFeesBreakdown(
     bySource,
     totalEth,
     totalUsd,
+    byToken,
     incomplete,
     incompleteReasons,
   };
