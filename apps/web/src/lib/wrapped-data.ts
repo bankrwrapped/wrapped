@@ -5,13 +5,16 @@ import type {
   Chain,
   FeesFetchStatus,
   WrappedCacheRow,
+  WrappedPayload,
   WrappedTokenEntry,
+  WrappedTradingVolume,
 } from "@bankr-wrapped/shared";
 
 export type { Chain, FeesFetchStatus };
 
-// feesEarnedEth is raw ETH, displayed as-is. source ("doppler" | "clanker")
-// isn't rendered yet - available for e.g. a Doppler/Clanker badge.
+// feesEarnedEth is raw ETH, displayed as-is. source is "doppler", "clanker"
+// (v4) or "clanker_v3_1" (Bankr's 2025 Clanker launches, which Bankr's own
+// list omits) - not rendered yet, available for e.g. a badge.
 export type TokenEntry = WrappedTokenEntry;
 
 export type WrappedProfile = {
@@ -32,6 +35,14 @@ export type WrappedProfile = {
   creatorEarningsEth: number;
   pleaseBroEarningsEth: number;
   unclaimedEth: number;
+  totalEth: number;
+  // Some fees couldn't be valued and count as 0: show earnings as "at least".
+  earningsPartial: boolean;
+  // Earliest known Bankr launch (Clanker v3.1, 2025) when there is one.
+  firstLaunch: NonNullable<WrappedPayload["summary"]["firstLaunch"]> | null;
+  // "pending" = not computed yet (don't show a number); isComplete false =
+  // a floor that's still being filled in ("at least").
+  tradingVolume: Pick<WrappedTradingVolume, "totalVolumeUsd" | "status" | "isComplete">;
   bestDay: { date: string; eth: number } | null;
   dailyEarnings: { date: string; eth: number }[];
   claimCount: number;
@@ -74,7 +85,23 @@ function upscaleAvatar(url: string): string {
   return url;
 }
 
-function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
+// Older cached rows hold tradingVolume as a JSON string (fixed in the API;
+// repaired by schema.sql) - read either form.
+function readTradingVolume(raw: unknown): WrappedProfile["tradingVolume"] {
+  let tv = raw;
+  if (typeof tv === "string") {
+    try {
+      tv = JSON.parse(tv);
+    } catch {
+      tv = null;
+    }
+  }
+  const v = tv as Partial<WrappedTradingVolume> | null;
+  if (!v || v.status !== "ok") return { totalVolumeUsd: 0, status: "pending", isComplete: false };
+  return { totalVolumeUsd: v.totalVolumeUsd ?? 0, status: "ok", isComplete: v.isComplete === true };
+}
+
+export function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
   const { payload } = row;
   return {
     handle: payload.user.handle,
@@ -92,6 +119,10 @@ function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     creatorEarningsEth: payload.earnings.creatorEarningsEth,
     pleaseBroEarningsEth: payload.earnings.pleaseBroEarningsEth,
     unclaimedEth: payload.claimable.unclaimedEth,
+    totalEth: payload.earnings.totalEth,
+    earningsPartial: payload.meta.earningsPartial === true,
+    firstLaunch: payload.summary.firstLaunch ?? null,
+    tradingVolume: readTradingVolume(payload.tradingVolume),
     bestDay: payload.bestDay,
     dailyEarnings: payload.dailyEarnings,
     claimCount: payload.claimCount,
@@ -137,7 +168,10 @@ export async function searchHandles(query: string): Promise<SearchSuggestion[]> 
     const res = await fetch(`${API_URL}/api/search?query=${encodeURIComponent(trimmed)}`);
     if (!res.ok) return [];
     const data: { results: SearchSuggestion[] } = await res.json();
-    return (data.results ?? []).map((s) => ({ ...s, profileImageUrl: upscaleAvatar(s.profileImageUrl) }));
+    return (data.results ?? []).map((s) => ({
+      ...s,
+      profileImageUrl: upscaleAvatar(s.profileImageUrl),
+    }));
   } catch {
     return [];
   }
