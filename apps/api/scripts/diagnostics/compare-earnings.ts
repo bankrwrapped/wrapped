@@ -8,10 +8,14 @@
  * Read-only: runs the same fetch the API does (wrappedService.fetchFromBankr)
  * without writing wrapped_profiles. Price lookups still fill the price cache.
  *
- * What to expect: the indexer reading at or above Bankr. Bankr's figure is
- * the WETH side only and limited to ?days=90; the indexer counts both sides
- * of Doppler fees, lifetime. A wallet far BELOW Bankr, or "incomplete", is
- * the one to dig into (--tokens shows which launch is off).
+ * What to expect: the indexer reading at or above Bankr. Both include
+ * claimable fees; the indexer also counts the launched-token side of Doppler
+ * fees, which Bankr's figure leaves out. A wallet far BELOW Bankr, or
+ * "incomplete", is the one to dig into (--tokens shows which launch is off).
+ * --tokens shows indexer payouts only (the breakdown), without claimable.
+ * "clanker NOT verified": the indexer's Clanker credits - claims don't match
+ * the fee locker's on-chain balance for that wallet, so its Clanker figures
+ * aren't trusted (and the wallet stays on Bankr's number).
  *
  * Usage (from apps/api, with the API's env - DATABASE_URL, ENVIO_*, ...):
  *   bun run scripts/diagnostics/compare-earnings.ts alice bob        # by handle
@@ -122,6 +126,9 @@ async function main() {
       bankrOk ? null : "bankr unavailable",
       indexerOk ? null : "indexer unavailable",
       incomplete ? "indexer incomplete" : null,
+      // Clanker ledger vs the fee locker on-chain (see clankerLedger.ts).
+      payload.meta.clankerVerified === true ? "clanker verified" : null,
+      payload.meta.clankerVerified === false ? "clanker NOT verified" : null,
     ].filter(Boolean);
     rows.push({
       handle,

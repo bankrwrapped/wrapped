@@ -264,6 +264,160 @@ export async function fetchIndexedFeeEventsPage(
   });
   return data[rootField];
 }
+// The wallet's whole Clanker ledger on a chain - fees credited to it
+// (StoreTokens) and claimed by it (ClaimTokens/ClaimTokensPermissioned, keyed
+// by fee owner) - across ALL its Clanker launches, for checking credited -
+// claimed against the locker's on-chain balance (clankerLedger.ts).
+const CLANKER_LEDGER_EVENT_TYPES = ["StoreTokens", "ClaimTokens", "ClaimTokensPermissioned"];
+
+export interface ClankerLedgerRow {
+  tokenAddress: string;
+  eventType: "StoreTokens" | "ClaimTokens" | "ClaimTokensPermissioned";
+  amountToken0: string | null;
+  blockNumber: string;
+  logIndex: number;
+}
+
+export async function fetchClankerLedgerPage(
+  chain: string,
+  feeOwner: string,
+  after: EventCursor,
+  limit: number = PAGE_SIZE,
+): Promise<ClankerLedgerRow[]> {
+  if (!SUPPORTED_CHAINS.has(chain)) {
+    throw new Error(`fetchClankerLedgerPage: unsupported chain=${chain}`);
+  }
+  const query = `
+    query ClankerLedgerPage($chain: String!, $owner: String!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
+      ${FEE_EVENT_ROOT_FIELD}(
+        where: {
+          chain: { _eq: $chain }
+          recipient: { _eq: $owner }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+          eventType: { _in: ${JSON.stringify(CLANKER_LEDGER_EVENT_TYPES)} }
+        }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
+        limit: $limit
+      ) {
+        tokenAddress eventType amountToken0 blockNumber logIndex
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClankerLedgerRow[]>>(chain, query, {
+    chain,
+    owner: feeOwner.toLowerCase(),
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
+    limit,
+  });
+  return data[FEE_EVENT_ROOT_FIELD];
+}
+
+// ---- Clanker v3.1 (Bankr launches 2025-03-18 to about July 2025) ----
+// Separate queries from the fee events above on purpose: these entities and
+// columns only exist after the re-index that added v3.1, and a missing field
+// fails the whole GraphQL query - keeping them apart means an indexer that
+// hasn't been re-indexed yet only loses v3.1, not every fee number.
+
+export interface ClankerV31LaunchRow {
+  positionId: string;
+  tokenAddress: string;
+  name: string;
+  symbol: string;
+  timestamp: string;
+}
+
+const V31_LAUNCH_ROOT_FIELD = "ClankerV31Launch";
+
+export async function fetchClankerV31Launches(chain: string, creatorAdmin: string): Promise<ClankerV31LaunchRow[]> {
+  if (!CHAINS_WITH_LAUNCHED_TOKEN.has(chain)) return [];
+  const query = `
+    query V31Launches($chain: String!, $admin: String!) {
+      ${V31_LAUNCH_ROOT_FIELD}(where: { chain: { _eq: $chain }, creatorAdmin: { _eq: $admin } }, order_by: { blockNumber: asc }) {
+        positionId tokenAddress name symbol timestamp
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClankerV31LaunchRow[]>>(chain, query, {
+    chain,
+    admin: creatorAdmin.toLowerCase(),
+  });
+  return data[V31_LAUNCH_ROOT_FIELD].map((r) => ({ ...r, positionId: String(r.positionId) }));
+}
+
+export interface ClankerV31ClaimRow {
+  tokenAddress: string;
+  tokenAddress1: string;
+  launchedToken: string;
+  amountToken0: string;
+  amountToken1: string;
+  blockNumber: string;
+  logIndex: number;
+  timestamp: string;
+}
+
+export async function fetchClankerV31ClaimsPage(
+  chain: string,
+  recipient: string,
+  after: EventCursor,
+  limit: number = PAGE_SIZE,
+): Promise<ClankerV31ClaimRow[]> {
+  if (!CHAINS_WITH_LAUNCHED_TOKEN.has(chain)) return [];
+  const query = `
+    query V31Claims($chain: String!, $recipient: String!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
+      ${FEE_EVENT_ROOT_FIELD}(
+        where: {
+          chain: { _eq: $chain }
+          recipient: { _eq: $recipient }
+          eventType: { _eq: "ClankerV31ClaimedRewards" }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+        }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
+        limit: $limit
+      ) {
+        tokenAddress tokenAddress1 launchedToken amountToken0 amountToken1 blockNumber logIndex timestamp
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClankerV31ClaimRow[]>>(chain, query, {
+    chain,
+    recipient: recipient.toLowerCase(),
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
+    limit,
+  });
+  return data[FEE_EVENT_ROOT_FIELD];
+}
+
+// The last block the indexer has fully processed - an on-chain read at this
+// block sees exactly the state its events describe.
+export async function fetchLatestProcessedBlock(chain: string): Promise<bigint | null> {
+  const chainId = CHAIN_ID_MAP[chain];
+  if (chainId === undefined) {
+    throw new Error(`fetchLatestProcessedBlock: unsupported chain=${chain}`);
+  }
+  const query = `
+    query ProcessedBlock($chainId: Int!) {
+      ${CHAIN_METADATA_ROOT_FIELD}(where: { chain_id: { _eq: $chainId } }) {
+        latest_processed_block
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, { latest_processed_block: number | string | null }[]>>(
+    chain,
+    query,
+    { chainId },
+  );
+  const value = data[CHAIN_METADATA_ROOT_FIELD][0]?.latest_processed_block;
+  return value === null || value === undefined ? null : BigInt(value);
+}
+
 // =============================================================================
 // NEW — WatchedPool lookup, added for Module 8's real backfill-completeness
 // check (item 37). Same envioQuery/table-map/error-message pattern as the

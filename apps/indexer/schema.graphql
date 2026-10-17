@@ -83,16 +83,33 @@ type PendingFeeAttribution {
   eventIds: [String!]! # IndexedFeeEvent ids, in log order, still awaiting ClaimedRewards
 }
 
+# A Bankr launch on Clanker v3.1 (TokenCreated with Bankr's deployer as
+# msgSender). Bankr's own API doesn't list these, so this is the scope the
+# API uses for them. Keyed by the LP position, which is how v3.1 fees are.
+type ClankerV31Launch {
+  id: ID! # `${chain}:${positionId}`
+  chain: String!
+  positionId: BigInt!
+  tokenAddress: String!
+  creatorAdmin: String! @index # the launch's owner - what the API looks launches up by
+  creatorRewardRecipient: String! # at deploy; the admin can change it later
+  name: String!
+  symbol: String!
+  blockNumber: BigInt!
+  timestamp: Timestamp!
+}
+
 type IndexedFeeEvent {
   id: ID! # `${chain}:${txHash}:${logIndex}`
   chain: String!
   poolId: String # null for Clanker fee events, which aren't pool-keyed
   tokenAddress: String!
-  eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned'
-  recipient: String # beneficiary (Release), feeOwner (StoreTokens/ClaimTokens), recipient (ClaimTokensPermissioned); null for Collect
+  eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned' | 'ClankerV31ClaimedRewards'
+  recipient: String # beneficiary (Release), feeOwner - the wallet that earned the fees - (StoreTokens/ClaimTokens/ClaimTokensPermissioned); null for Collect
   launchedToken: String # the launch these fees were earned on: the pool's launched token for Doppler, attributed via the LP locker's ClaimedRewards for Clanker StoreTokens; null for Clanker claims (a claim can't be tied to a launch)
   amountToken0: BigInt
   amountToken1: BigInt
+  tokenAddress1: String # second fee token, when one event pays two (ClankerV31ClaimedRewards: tokenAddress/amountToken0 and tokenAddress1/amountToken1)
   blockNumber: BigInt!
   txHash: String!
   logIndex: Int!

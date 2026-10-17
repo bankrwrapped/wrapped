@@ -226,6 +226,16 @@ describe.skipIf(!ADMIN_URL)("repositories (real Postgres)", () => {
     expect(order.indexOf("0xtieold")).toBeLessThan(order.indexOf("0xtienew"));
   });
 
+  test("listStale returns only profiles older than the cutoff, stalest first", async () => {
+    await raw`delete from wrapped_profiles`;
+    for (const w of ["0xold", "0xolder", "0xfresh"]) await repos.wrapped.upsert(w, w.slice(2), payload(w, 1, 1, 0));
+    await raw`update wrapped_profiles set updated_at = now() - interval '2 hours' where wallet_address = '0xold'`;
+    await raw`update wrapped_profiles set updated_at = now() - interval '3 days' where wallet_address = '0xolder'`;
+    const stale = await repos.wrapped.listStale(new Date(Date.now() - 60 * 60_000), 10);
+    expect(stale.map((r) => r.username)).toEqual(["older", "old"]);
+    expect((await repos.wrapped.listStale(new Date(Date.now() - 60 * 60_000), 1)).length).toBe(1);
+  });
+
   test("ready notification can be claimed exactly once, and released for retry", async () => {
     await repos.wrapped.upsert("0xnotify", "notifyme", payload("0xnotify", 1, 1, 0));
     const [a, b] = await Promise.all([

@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "envio codegen",
     "dev": "envio dev",
-    "start": "envio start",
+    "start": "bun run scripts/start.ts",
     "test": "bun --no-env-file test ./test"
   },
   "dependencies": {

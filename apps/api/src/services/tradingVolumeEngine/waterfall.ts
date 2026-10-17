@@ -55,6 +55,10 @@ export async function resolveTokenVolume(
   }
 
   for (const provider of PROVIDERS) {
+    // The indexer only sees Uniswap V4 swaps: asked about a V3 (Clanker
+    // v3.1) token it would backfill zero swaps and report $0 as complete,
+    // stopping the fallback to providers that do have the pool.
+    if (provider === fetchIndexerVolume && token.source === "clanker_v3_1") continue;
     const result = await provider(token);
 
     /*

@@ -1,6 +1,9 @@
 export type ChainId = "base" | "robinhood";
 
-export type TokenSource = "doppler" | "clanker" | "unknown";
+// "clanker_v3_1": Bankr's Clanker v3.1 launches - Uniswap V3 pools, which the
+// indexer doesn't track (it sees V4 swaps only), so their volume comes from
+// the external providers.
+export type TokenSource = "doppler" | "clanker" | "clanker_v3_1" | "unknown";
 
 export interface TokenRef {
   address: string;

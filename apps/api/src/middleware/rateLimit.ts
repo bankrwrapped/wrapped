@@ -51,6 +51,10 @@ export function createRateLimiter(windowMs: number, max: number) {
 // 20 requests per minute per IP on the search/lookup route.
 export const checkWrappedRouteLimit = createRateLimiter(60_000, 20);
 
+// Trusted clients (see trustedClients.ts) - one bucket per client key, sized
+// for a bot serving many users.
+export const checkTrustedWrappedRouteLimit = createRateLimiter(60_000, 600);
+
 // /api/auth/me runs on every page load (useAuth on mount) and hits the DB,
 // plus Bankr for wallet-less sessions - previously unlimited.
 export const checkAuthMeRouteLimit = createRateLimiter(60_000, 30);
