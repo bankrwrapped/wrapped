@@ -3,6 +3,7 @@ import { startXLogin, handleXCallback, getMe } from "./controllers/authControlle
 import {
   checkAuthMeRouteLimit,
   checkSearchSuggestRouteLimit,
+  checkStatusRouteLimit,
   checkTrustedWrappedRouteLimit,
   checkWrappedRouteLimit,
 } from "./middleware/rateLimit";
@@ -11,6 +12,7 @@ import { wrappedService } from "./services/wrappedService";
 import { startBackfillSweep } from "./services/indexerSync/backfillSweep";
 import { startRefreshSweep } from "./services/indexerSync/refreshSweep";
 import { startLeaderboardRefresh } from "./services/leaderboardRefresh";
+import { getStatus, startStatusSampler } from "./services/statusService";
 
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -95,6 +97,18 @@ Bun.serve({
     }
     if (url.pathname === "/health") {
       return withCors(Response.json({ status: "ok" }), req);
+    }
+    if (url.pathname === "/api/status" && req.method === "GET") {
+      const limit = checkStatusRouteLimit(getClientIp(req, server));
+      if (!limit.allowed) {
+        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
+      }
+      try {
+        return withCors(Response.json(await getStatus()), req);
+      } catch (err) {
+        console.error("[api] status request failed:", err);
+        return withCors(Response.json({ error: "status unavailable" }, { status: 500 }), req);
+      }
     }
     if (url.pathname === "/auth/x/login" && req.method === "GET") {
       return startXLogin(req);
@@ -222,6 +236,7 @@ Bun.serve({
 startBackfillSweep("base");
 startRefreshSweep("base");
 startLeaderboardRefresh();
+startStatusSampler();
 
 console.log("[api] listening on http://localhost:" + PORT);
 // Skipped under tests (bun test sets NODE_ENV=test): a test run must not
