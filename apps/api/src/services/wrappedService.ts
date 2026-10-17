@@ -255,7 +255,44 @@ function pickBestMatch(
   return sorted[0];
 }
 
+// handle -> Bankr account, cached in-process. Every /api/wrapped request
+// resolved the handle against Bankr's search BEFORE checking the payload
+// cache, so even a cache hit spent a Bankr rate-limit slot and an outbound
+// round-trip (observed 2.3-6.4s). Not-found is cached briefly so a typo'd
+// handle can't be used to hammer Bankr, but a new Bankr account shows up
+// soon after creation.
+const RESOLVE_CACHE_TTL_MS = 10 * 60 * 1000;
+const RESOLVE_NOT_FOUND_TTL_MS = 2 * 60 * 1000;
+const RESOLVE_CACHE_MAX_ENTRIES = 10_000;
+const resolveCache = new Map<string, { match: BankrUserSearchResult | null; expiresAt: number }>();
+
+function cacheResolved(key: string, match: BankrUserSearchResult | null): void {
+  if (resolveCache.size >= RESOLVE_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [k, v] of resolveCache) {
+      if (v.expiresAt <= now) resolveCache.delete(k);
+    }
+    // Still full of live entries: drop the oldest (Map keeps insertion order).
+    if (resolveCache.size >= RESOLVE_CACHE_MAX_ENTRIES) {
+      const oldest = resolveCache.keys().next().value;
+      if (oldest !== undefined) resolveCache.delete(oldest);
+    }
+  }
+  const ttl = match ? RESOLVE_CACHE_TTL_MS : RESOLVE_NOT_FOUND_TTL_MS;
+  resolveCache.set(key, { match, expiresAt: Date.now() + ttl });
+}
+
 async function resolveWallet(handle: string): Promise<BankrUserSearchResult | null> {
+  const key = handle.toLowerCase();
+  const hit = resolveCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.match;
+
+  const match = await resolveWalletFromBankr(handle);
+  cacheResolved(key, match);
+  return match;
+}
+
+async function resolveWalletFromBankr(handle: string): Promise<BankrUserSearchResult | null> {
   console.log("[wrappedService] resolveWallet: start, handle=" + handle);
   const rateLimitStart = Date.now();
   await bankrRateLimiter.beforeSearch();

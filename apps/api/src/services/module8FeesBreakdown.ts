@@ -244,10 +244,7 @@ export async function getBeneficiaryFeesBreakdown(
   async function getWatchedPool(chain: Chain, poolId: string): Promise<WatchedPoolRow | null> {
     const key = `${chain}:${poolId}`;
     if (watchedPoolCache.has(key)) return watchedPoolCache.get(key)!;
-    const t0 = Date.now();
-    console.log(`[DEBUG-timing] fetchWatchedPool: start chain=${chain} poolId=${poolId}`);
     const pool = await fetchWatchedPool(chain, poolId);
-    console.log(`[DEBUG-timing] fetchWatchedPool: done chain=${chain} poolId=${poolId} elapsedMs=${Date.now() - t0}`);
     watchedPoolCache.set(key, pool);
     return pool;
   }
@@ -256,10 +253,7 @@ export async function getBeneficiaryFeesBreakdown(
     try {
       let cursor = cursorAfterBlock("0");
       for (;;) {
-        const tPage = Date.now();
-        console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: start chain=${chain} fromBlock=${cursor.blockNumber}`);
         const page = await fetchIndexedFeeEventsPage(chain, address, cursor);
-        console.log(`[DEBUG-timing] fetchIndexedFeeEventsPage: done chain=${chain} fromBlock=${cursor.blockNumber} elapsedMs=${Date.now() - tPage} pageLen=${page.length}`);
         if (page.length === 0) break;
 
         const scope = await bankrTokens;
