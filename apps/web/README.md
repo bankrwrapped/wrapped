@@ -1,40 +1,40 @@
 # apps/web
 
-Frontend for Bankr Wrapped. React + TanStack Start.
+The Bankr Wrapped frontend, built with React 19 + [TanStack Start](https://tanstack.com/start) and deployed as a Cloudflare Worker (Lovable / Nitro build).
 
 ## Current state
 
-The full six-scene reveal experience is designed (see the project's shared spec doc) but not yet built. Live right now: a flat landing page with a WebGL double-helix braid background. All CTAs (Connect X, Generate) route to `/soon` — a coming-soon page showing a blurred share-card teaser and the $BNW contract address. No OAuth is triggered yet from the landing page.
+- **Live:** the landing page, `/leaderboard`, `/about`, and `/soon`.
+- **Gated sign-in:** "Connect X" goes to `/soon` on purpose until launch. At launch, point it at `X_LOGIN_URL` (`src/lib/wrapped-data.ts`).
+- **The reveal isn't built yet:** the signed-in view is a placeholder until the reveal sequence is.
+
+## API access: same-origin proxy
+
+`src/server.ts` forwards `/api/*` and `/auth/*` to the Bankr Wrapped API (`API_ORIGIN`, defaulting to the Railway URL). It passes OAuth redirects and `Set-Cookie` headers through unchanged, and forwards the visitor's IP and protocol.
+
+The browser only ever talks to bankrwrapped.com, so the session cookie is first-party. That's required for Safari and iOS, which block third-party cookies.
+
+Frontend code calls the API with relative URLs (`API_URL` is `""` by default). Set `VITE_API_URL` only to bypass the proxy, for example to point a dev build straight at a local API.
 
 ## Stack
 
-- React + [TanStack Start](https://tanstack.com/start)
-- Three.js via `@react-three/fiber` + `@react-three/drei` + `@react-three/postprocessing` (background/reveal visuals)
-- Design system: violet + orange palette, Clash Display / PP Mori / Departure Mono fonts
-
-## Pages (planned)
-
-1. Landing (pre-sign-in) — hero CTA + public leaderboard
-2. Leaderboard — top 20 + your rank if signed in
-3. No-account redirect — sends new users to Bankr
-4. No-data state — wallets under $1 total activity
-5. Reveal sequence — profile → tokens → please-bro → earnings → volume (last, since it's the slowest to compute)
-6. Share card — fixed 2–3 hero stats
-
-## Auth
-
-X sign-in only (no wallet-connect, no handle search). Handled entirely by `apps/api` (Module 14) — this app just redirects to the API's OAuth start route and reads the resulting session cookie.
+- React 19, TanStack Start / Router, TanStack Query
+- Tailwind CSS 4, shadcn/ui (Radix)
+- Three.js via `@react-three/fiber` / `drei` / `postprocessing` for the visuals
+- Payload types are imported from `@bankr-wrapped/shared`
 
 ## Run
 
 ```bash
 bun install
-bun run dev
+bun run dev         # Vite dev server
+bun run typecheck
+bun run test        # proxy + URL helper tests
 ```
 
-Requires `apps/api` running locally for real data (or point at the deployed API).
+For real data, run `apps/api` locally (set `API_ORIGIN` / `VITE_API_ORIGIN` to it) or use the deployed API.
 
 ## Notes
 
-- 3D/visual layer must stay code-split behind the reveal trigger, not loaded on initial page load.
-- Design for mid-tier mobile first — full effects are a progressive enhancement, not the default.
+- **Keep the 3D layer code-split** behind the reveal trigger, so it isn't loaded on first page load.
+- **Design for mid-tier mobile first.** Full effects are a progressive enhancement.

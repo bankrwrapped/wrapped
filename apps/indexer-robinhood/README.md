@@ -1,16 +1,16 @@
 # apps/indexer-robinhood
 
-On-chain indexer for **Robinhood Chain**. [Envio HyperIndex](https://envio.dev).
-
-Fully independent from `apps/indexer-base` — separate config, schema, and database. Do not share files between the two.
+On-chain indexer for **Robinhood Chain** (chain 4663), built with [Envio HyperIndex](https://envio.dev). It's fully independent of `apps/indexer` (Base), with its own config, schema and database. Don't share files between the two.
 
 ## Status: paused
 
-Backfill is paused, not broken. Free-tier RPC access cannot sustain a full backfill on this chain (confirmed after trying four different providers) — resuming requires a paid RPC tier. Real progress made so far is saved and resumes cleanly once that's decided; no rework needed, just swap the RPC URL.
+The backfill is paused, not broken. Free-tier RPC can't sustain a full backfill on this chain (tried with four providers), so resuming needs a paid RPC tier. Progress so far is saved and resumes cleanly; it only needs a new RPC URL.
 
-## What it watches
+While it's paused, the API skips this chain for wallets that have no Bankr launches on it, so it doesn't affect Base-only users.
 
-- Doppler launches only (Clanker is not deployed on Robinhood Chain)
+## What it indexes
+
+Doppler only (`Airlock.Create`, `PoolManager.Initialize`/`Swap`, `StreamableFeesLockerV2.Collect`/`Release`). Clanker isn't deployed on Robinhood Chain. Beneficiary addresses are stored lowercased.
 
 ## Run
 
@@ -18,11 +18,10 @@ Backfill is paused, not broken. Free-tier RPC access cannot sustain a full backf
 bun install
 bunx envio codegen
 bunx envio dev
+bun run test
 ```
-
-Table names fixed via `pg_set_table_customization`, always prefixed `robinhood_` (e.g. `robinhood_KnownAsset`, `robinhood_IndexedSwap`).
 
 ## Notes
 
-- Robinhood Chain is an Arbitrum Orbit chain, not OP-stack — use the Nitro RPC's `"finalized"` block tag for checkpointing, not Base's checkpoint logic.
-- Not HyperSync-supported — this indexer is RPC-bound regardless of provider, which is the real reason free tiers can't keep up.
+- **Checkpointing:** Robinhood Chain is an Arbitrum Orbit chain, not OP Stack. Use the Nitro RPC's `"finalized"` block tag for checkpointing, not Base's logic.
+- **Why free RPC can't keep up:** the chain isn't HyperSync-supported, so this indexer is RPC-bound with any provider.
