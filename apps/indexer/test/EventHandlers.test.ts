@@ -81,6 +81,16 @@ test("attribution is per transaction", async () => {
   expect([...store.IndexedFeeEvent.values()][0].launchedToken).toBe("0xmine");
 });
 
+test("Clanker claims are kept whatever the fee token (WETH included), keyed by the fee owner", async () => {
+  await emit("ClankerFeeLocker.ClaimTokens", { feeOwner: "0xEarner", token: WETH, amountClaimed: 4n });
+  await emit("ClankerFeeLocker.ClaimTokensPermissioned", { feeOwner: "0xEarner", token: WETH, recipient: "0xPayee", amountClaimed: 2n });
+  const rows = [...store.IndexedFeeEvent.values()].sort((a, b) => a.logIndex - b.logIndex);
+  expect(rows.map((r) => [r.eventType, r.recipient, r.tokenAddress, r.amountToken0, r.launchedToken])).toEqual([
+    ["ClaimTokens", "0xearner", WETH, 4n, undefined],
+    ["ClaimTokensPermissioned", "0xearner", WETH, 2n, undefined],
+  ]);
+});
+
 test("Doppler Release: beneficiary lowercased, launchedToken set, both fee amounts kept", async () => {
   await emit("Airlock.Create", { asset: "0xDopplerToken", numeraire: WETH, initializer: "0xi", poolOrHook: "0xh" });
   await emit("PoolManager.Initialize", {

@@ -89,7 +89,7 @@ type IndexedFeeEvent {
   poolId: String # null for Clanker fee events, which aren't pool-keyed
   tokenAddress: String!
   eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned'
-  recipient: String # beneficiary (Release), feeOwner (StoreTokens/ClaimTokens), recipient (ClaimTokensPermissioned); null for Collect
+  recipient: String # beneficiary (Release), feeOwner - the wallet that earned the fees - (StoreTokens/ClaimTokens/ClaimTokensPermissioned); null for Collect
   launchedToken: String # the launch these fees were earned on: the pool's launched token for Doppler, attributed via the LP locker's ClaimedRewards for Clanker StoreTokens; null for Clanker claims (a claim can't be tied to a launch)
   amountToken0: BigInt
   amountToken1: BigInt

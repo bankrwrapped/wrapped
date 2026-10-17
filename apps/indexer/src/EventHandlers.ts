@@ -341,22 +341,29 @@ indexer.onEvent({ contract: "ClankerLpLocker", event: "ClaimedRewards" }, async 
   context.PendingFeeAttribution.set({ id: pendingId, eventIds: [] });
 });
 
-indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({ event, context }) => {
+// Clanker claims, kept so the API can check each wallet's Clanker numbers:
+// per fee token, stored (StoreTokens) - claimed = the locker's on-chain
+// availableFees. A claim can't be tied to a launch (it pays out a pooled
+// per-fee-token balance), so launchedToken stays unset.
+//
+// No KnownToken(fee token) filter any more: like StoreTokens, the fee token
+// is usually WETH, which is never a KnownToken, so that filter dropped
+// nearly every claim. Every row is keyed by feeOwner - the wallet that
+// earned the fees - including permissioned claims paid to someone else.
+function setClankerClaim(
+  context: any,
+  event: any,
+  eventType: "ClaimTokens" | "ClaimTokensPermissioned",
+): void {
   const chain = chainName(context.chain.id);
-  const feeOwner = normalizeAddress(event.params.feeOwner);
-  const token = normalizeAddress(event.params.token);
-
-  const known = await context.KnownToken.get(`${chain}:${token}`);
-  if (!known) return;
-
   context.IndexedFeeEvent.set({
     id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
     chain,
     poolId: undefined,
-    tokenAddress: token,
-    eventType: "ClaimTokens",
-    recipient: feeOwner,
-    launchedToken: undefined, // claims pay out a pooled per-fee-token balance - not attributable to one launch
+    tokenAddress: normalizeAddress(event.params.token),
+    eventType,
+    recipient: normalizeAddress(event.params.feeOwner),
+    launchedToken: undefined,
     amountToken0: event.params.amountClaimed,
     amountToken1: undefined,
     blockNumber: BigInt(event.block.number),
@@ -364,30 +371,12 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({
     logIndex: event.logIndex,
     timestamp: new Date(event.block.timestamp * 1000),
   });
+}
+
+indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokens" }, async ({ event, context }) => {
+  setClankerClaim(context, event, "ClaimTokens");
 });
 
 indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokensPermissioned" }, async ({ event, context }) => {
-  const chain = chainName(context.chain.id);
-  const feeOwner = normalizeAddress(event.params.feeOwner);
-  const token = normalizeAddress(event.params.token);
-  const recipient = normalizeAddress(event.params.recipient);
-
-  const known = await context.KnownToken.get(`${chain}:${token}`);
-  if (!known) return;
-
-  context.IndexedFeeEvent.set({
-    id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
-    chain,
-    poolId: undefined,
-    tokenAddress: token,
-    eventType: "ClaimTokensPermissioned",
-    recipient, // the actual payout recipient, distinct from feeOwner here
-    launchedToken: undefined, // same as ClaimTokens - not attributable to one launch
-    amountToken0: event.params.amountClaimed,
-    amountToken1: undefined,
-    blockNumber: BigInt(event.block.number),
-    txHash: event.transaction.hash,
-    logIndex: event.logIndex,
-    timestamp: new Date(event.block.timestamp * 1000),
-  });
+  setClankerClaim(context, event, "ClaimTokensPermissioned");
 });
