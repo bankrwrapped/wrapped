@@ -91,7 +91,16 @@ type ApiWrappedCacheRow = {
   percentile: number;
 };
 
-const API_URL = import.meta.env.VITE_API_URL ?? "https://wrapped-production.up.railway.app";
+// Single source for the API base - use-auth.ts imports this too. Defaults to
+// "" (same origin): src/server.ts proxies /api/* and /auth/* to the Railway
+// API, which keeps the session cookie first-party - required for Safari/iOS,
+// which block third-party cookies. Only set VITE_API_URL to bypass the proxy
+// (e.g. pointing a dev build straight at a local API).
+export const API_URL = import.meta.env.VITE_API_URL ?? "";
+
+// Starts X OAuth (apps/api authController.startXLogin). Must go through the
+// same origin as API_URL so the PKCE + session cookies land first-party.
+export const X_LOGIN_URL = `${API_URL}/auth/x/login`;
 
 function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
@@ -187,7 +196,9 @@ export const formatEth = (n: number) => {
 // browser's cross-origin canvas-tainting restriction - only needed where
 // a captured image is involved, not for normal display.
 export function proxiedImageUrl(url: string): string {
-  if (url.startsWith(API_URL)) return url;
+  // Already pointing at our proxy (relative or absolute) - don't wrap twice.
+  // (A bare startsWith(API_URL) is always true once API_URL is "".)
+  if (url.includes("/api/image-proxy?")) return url;
   return `${API_URL}/api/image-proxy?url=${encodeURIComponent(url)}`;
 }
 

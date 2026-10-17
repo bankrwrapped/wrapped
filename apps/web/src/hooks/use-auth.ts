@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+import { API_URL } from "@/lib/wrapped-data";
 
 export type AuthState =
   | { status: "checking" }

@@ -10,11 +10,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { X_LOGIN_URL } from "@/lib/wrapped-data";
 import { useIsMobile } from "./useMediaQuery";
 import { T } from "./tokens";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
-const OAUTH_START_URL = `${API_URL}/api/auth/x/start`;
 
 const BUILDERS = [
   { name: "Kabeer", handle: "basedkabeer" },
@@ -37,7 +36,8 @@ export function LandingHeader() {
   const connect = () => {
     const el = document.getElementById("signin-block");
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    else window.location.assign(OAUTH_START_URL);
+    // Was `${API_URL}/api/auth/x/start` - a route the API never had.
+    else window.location.assign(X_LOGIN_URL);
   };
 
   return (
