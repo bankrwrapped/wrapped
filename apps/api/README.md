@@ -55,6 +55,7 @@ Optional:
 ```
 ROBINHOOD_RPC_URL         # defaults to the public endpoint
 WRAPPED_WEBHOOK_SECRET    # needed for "Wrapped ready" notifications; skipped (logged) while unset
+EARNINGS_SOURCE           # "indexer" shows the indexer's earnings (when ok and complete); anything else, Bankr's
 PORT                      # default 4000
 ```
 
@@ -92,4 +93,4 @@ scripts/
   maintenance/        one-off DB maintenance
 ```
 
-Diagnostics hit real services and need a real `.env`. Run them by hand, for example `bun run scripts/diagnostics/builder-volume.ts <wallet>`.
+Diagnostics hit real services and need a real `.env`. Run them by hand, for example `bun run scripts/diagnostics/builder-volume.ts <wallet>`. `compare-earnings.ts` prints Bankr's and the indexer's earnings side by side (`<handles...>` or `--top N`, `--tokens` for per-token detail).

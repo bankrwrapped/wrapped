@@ -187,10 +187,17 @@ export function shouldRefreshTradingVolume(
 // Root cause of WHY it was slow/hanging for this wallet is still open -
 // this fix addresses the symptom (endpoint returns nothing), not
 // necessarily the underlying slowness inside module8FeesBreakdown.ts.
+interface IndexerEarningsResult {
+  data: number;
+  status: "ok" | "unavailable";
+  byToken: Record<string, number>;
+  incomplete: boolean;
+}
+
 async function fetchEarningsFromIndexer(
   address: string,
   bankrTokens: Promise<Set<string>>
-): Promise<{ data: number; status: "ok" | "unavailable" }> {
+): Promise<IndexerEarningsResult> {
   console.log("[wrappedService] fetchEarningsFromIndexer: start");
 
   // FIXED 2026-08-18 (session 2, second crash bug): getBeneficiaryFeesBreakdown
@@ -238,11 +245,36 @@ async function fetchEarningsFromIndexer(
     // Bankr's own API returning a real but partial result. "unavailable"
     // is reserved for the whole fetch throwing outright (Envio/Postgres
     // down, timeout, etc), same meaning as fetchCreatorFees/fetchBeneficiaryFees.
-    return { data: breakdown.totalEth, status: "ok" };
+    return { data: breakdown.totalEth, status: "ok", byToken: breakdown.byToken, incomplete: breakdown.incomplete };
   } catch (err) {
     console.log("[wrappedService] fetchEarningsFromIndexer: failed, err=" + String(err));
-    return { data: 0, status: "unavailable" };
+    return { data: 0, status: "unavailable", byToken: {}, incomplete: false };
   }
+}
+
+// EARNINGS_SOURCE=indexer makes the indexer's number the displayed one (and
+// so the leaderboard's, which ranks by earnings.totalEth). Off by default
+// until the indexer and Bankr numbers have been compared on real wallets -
+// see scripts/diagnostics/compare-earnings.ts. Read per call so tests can
+// toggle it.
+function indexerEarningsEnabled(): boolean {
+  return process.env.EARNINGS_SOURCE === "indexer";
+}
+
+// Logged, not acted on: a big gap between the two sources is worth a look,
+// but the indexer is expected to read higher (Bankr's figure is WETH-only
+// and limited to ?days=90), so this flags rather than vetoes.
+const EARNINGS_DISAGREEMENT_RATIO = 0.2;
+const EARNINGS_DISAGREEMENT_MIN_ETH = 0.01;
+
+function warnOnEarningsDisagreement(wallet: string, bankrEth: number, indexerEth: number, incomplete: boolean): void {
+  const diff = Math.abs(indexerEth - bankrEth);
+  if (diff < EARNINGS_DISAGREEMENT_MIN_ETH) return;
+  if (diff / Math.max(bankrEth, indexerEth) < EARNINGS_DISAGREEMENT_RATIO) return;
+  console.warn(
+    "[wrappedService] earnings disagreement, wallet=" + wallet +
+    " bankrEth=" + bankrEth + " indexerEth=" + indexerEth + " incomplete=" + incomplete
+  );
 }
 
 function pickBestMatch(
@@ -503,6 +535,10 @@ async function bankrTokenScope(
   return keys;
 }
 
+function bothFeesOkFor(creator: { status: string }, beneficiary: { status: string }): boolean {
+  return creator.status === "ok" && beneficiary.status === "ok";
+}
+
 async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayload> {
   console.log("[wrappedService] fetchFromBankr: start, wallet=" + match.evmAddress);
   const creatorPromise = fetchCreatorFees(match.evmAddress);
@@ -565,8 +601,46 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     0
   );
 
-  const creatorEarningsEth = creatorClaimedWeth + creatorClaimableWeth;
-  const pleaseBroEarningsEth = pleaseBroClaimedWeth + pleaseBroClaimableWeth;
+  const bankrCreatorEth = creatorClaimedWeth + creatorClaimableWeth;
+  const bankrPleaseBroEth = pleaseBroClaimedWeth + pleaseBroClaimableWeth;
+  const bankrTotalEth = bankrCreatorEth + bankrPleaseBroEth;
+
+  const indexer = earningsFromIndexerResult;
+  if (indexer.status === "ok" && bothFeesOkFor(creatorResult, beneficiaryResult)) {
+    warnOnEarningsDisagreement(match.evmAddress, bankrTotalEth, indexer.data, indexer.incomplete);
+  }
+
+  // Indexer-sourced: every displayed fee figure (per token, creator, Please
+  // Bro, total) comes from the indexer so they add up. A token listed on
+  // both sides, or twice, shows its fees on each entry but counts once.
+  // Incomplete indexer numbers understate, so those fall back to Bankr.
+  const useIndexer = indexerEarningsEnabled() && indexer.status === "ok" && !indexer.incomplete;
+  let tokens = launchedTokens;
+  let pleaseBro = pleaseBroTokens;
+  let creatorEarningsEth = bankrCreatorEth;
+  let pleaseBroEarningsEth = bankrPleaseBroEth;
+  if (useIndexer) {
+    const counted = new Set<string>();
+    const side = (entries: WrappedTokenEntry[]) => {
+      let sum = 0;
+      const out = entries.map((t) => {
+        const key = bankrTokenKey(t.chain, t.tokenAddress);
+        const feesEarnedEth = indexer.byToken[key] ?? 0;
+        if (!counted.has(key)) {
+          counted.add(key);
+          sum += feesEarnedEth;
+        }
+        return { ...t, feesEarnedEth };
+      });
+      return { out, sum };
+    };
+    const c = side(launchedTokens);
+    const p = side(pleaseBroTokens);
+    tokens = c.out;
+    pleaseBro = p.out;
+    creatorEarningsEth = c.sum;
+    pleaseBroEarningsEth = p.sum;
+  }
   const totalEth = creatorEarningsEth + pleaseBroEarningsEth;
   const unclaimedEth = creatorClaimableWeth + pleaseBroClaimableWeth;
 
@@ -618,11 +692,10 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   );
   const claimCount = creatorClaimCount + pleaseBroClaimCount;
 
-  const bothFeesOk =
-    creatorResult.status === "ok" && beneficiaryResult.status === "ok";
+  const bothFeesOk = bothFeesOkFor(creatorResult, beneficiaryResult);
   const allZero =
     creator.tokens.length === 0 &&
-    pleaseBroTokens.length === 0 &&
+    pleaseBro.length === 0 &&
     total === 0 &&
     unclaimed === 0;
   const hasActivity = !(allZero && bothFeesOk);
@@ -635,8 +708,8 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       avatar: match.profileImageUrl,
       wallet: match.evmAddress,
     },
-    tokens: launchedTokens,
-    pleaseBroTokens,
+    tokens,
+    pleaseBroTokens: pleaseBro,
     earnings: {
       creatorEarnings,
       pleaseBroEarnings,
@@ -655,9 +728,12 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
       creatorFeesStatus: creatorResult.status,
       beneficiaryFeesStatus: beneficiaryResult.status,
       earningsFromIndexerStatus: earningsFromIndexerResult.status,
+      earningsFromIndexerIncomplete: indexer.incomplete,
+      earningsSource: useIndexer ? "indexer" : "bankr",
     },
     tradingVolume: PENDING_TRADING_VOLUME,
     earningsFromIndexer,
+    earningsFromBankr: bankrTotalEth,
   };
 }
 
@@ -669,7 +745,7 @@ async function attachRank(row: PersistedWrappedRow): Promise<WrappedCacheRow> {
   return { ...row, rank, totalUsers, percentile };
 }
 
-function mergeWithCache(
+export function mergeWithCache(
   fresh: WrappedPayload,
   previous: WrappedPayload | null
 ): WrappedPayload {
@@ -725,6 +801,23 @@ function mergeWithCache(
     console.log("[wrappedService] mergeWithCache: earnings-from-indexer degraded this fetch, keeping previous cached value");
     merged.earningsFromIndexer = previous.earningsFromIndexer;
     merged.meta = { ...merged.meta, earningsFromIndexerStatus: "ok" };
+  }
+
+  // Last time the displayed earnings came from the indexer, this time they
+  // couldn't (indexer unavailable - which it is whenever a Bankr call
+  // degraded - or incomplete). Keep the previous indexer-sourced figures
+  // whole instead of flipping the wallet back to Bankr's number, or mixing
+  // the two through the Bankr carry-forward above.
+  if (
+    indexerEarningsEnabled() &&
+    fresh.meta.earningsSource !== "indexer" &&
+    previous.meta.earningsSource === "indexer"
+  ) {
+    console.log("[wrappedService] mergeWithCache: indexer earnings not usable this fetch, keeping previous indexer-sourced earnings");
+    merged.earnings = previous.earnings;
+    merged.tokens = previous.tokens;
+    merged.pleaseBroTokens = previous.pleaseBroTokens;
+    merged.meta = { ...merged.meta, earningsSource: "indexer" };
   }
 
   return merged;
