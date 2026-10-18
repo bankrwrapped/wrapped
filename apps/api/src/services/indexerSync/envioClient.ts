@@ -16,6 +16,11 @@ const ENDPOINT_MAP: Record<string, string> = {
   robinhood: env.ENVIO_GRAPHQL_URL_ROBINHOOD,
 };
 
+const ADMIN_SECRET_MAP: Record<string, string | undefined> = {
+  base: env.ENVIO_HASURA_ADMIN_SECRET_BASE,
+  robinhood: env.ENVIO_HASURA_ADMIN_SECRET_ROBINHOOD,
+};
+
 const CHAIN_ID_MAP: Record<string, number> = {
   base: 8453,
   robinhood: 4663,
@@ -26,9 +31,12 @@ async function envioQuery<T>(chain: string, query: string, variables: Record<str
   if (!url) {
     throw new Error(`envioQuery: no Envio endpoint configured for chain=${chain}`);
   }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const secret = ADMIN_SECRET_MAP[chain];
+  if (secret) headers["x-hasura-admin-secret"] = secret;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ query, variables }),
   });
   if (!res.ok) {

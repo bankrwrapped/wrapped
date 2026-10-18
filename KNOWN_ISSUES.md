@@ -102,7 +102,7 @@ Bankr's API stays the source of *which tokens are Bankr launches*. Nothing on-ch
 - **Refresh retry window:** a refresh retries unpriced swaps every 5 minutes, so its 5 attempts span about 25 minutes, versus about 75 for backfill.
 
 ### Security and operations
-- **Hasura exposure** (*unverified*): `envioQuery` sends no auth header, so the Envio/Hasura GraphQL endpoints are presumably public. Confirm they're private, or at least read-only with no admin access.
+- **Hasura access (resolved for Base, 2026-10-18).** Since its re-index, the Base indexer's Hasura rejects anonymous queries (`x-hasura-admin-secret/x-hasura-access-key required`), so it's no longer publicly readable. The API now sends `ENVIO_HASURA_ADMIN_SECRET_BASE` as `x-hasura-admin-secret`. Until that variable is set on the API, every Base indexer read fails: backfills (309 failed on 2026-10-18), `/api/status`, v3.1 and the Clanker check. Robinhood's Hasura: unchecked (the indexer is paused).
 - **Safari and the subdomain option:** sign-in works in every browser through the frontend proxy. Serving the API from an `api.bankrwrapped.com` subdomain would be an alternative that doesn't depend on the proxy.
 - **Observability:** logs are console-only, with no metrics or alerts. "Unavailable" degradations are invisible.
 - **Migrations:** `schema.sql` is idempotent and catches older databases up, but there's no real migration tool.

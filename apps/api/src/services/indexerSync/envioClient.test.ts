@@ -4,15 +4,20 @@
 import "../../test/setupEnv";
 import { test, expect, beforeEach, afterAll } from "bun:test";
 
+// Base's Hasura needs its admin secret (since the 2026-10-17 re-index);
+// Robinhood's doesn't have one configured here.
+process.env.ENVIO_HASURA_ADMIN_SECRET_BASE = "base-secret";
+delete process.env.ENVIO_HASURA_ADMIN_SECRET_ROBINHOOD;
+
 const { fetchIndexedFeeEventsPage, fetchIndexedSwapsPage, cursorAfterBlock, cursorAfterEvent } = await import(
   "./envioClient"
 );
 
-let requests: { url: string; query: string; variables: Record<string, unknown> }[] = [];
+let requests: { url: string; query: string; variables: Record<string, unknown>; headers: Headers }[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
   const body = JSON.parse(String(init?.body));
-  requests.push({ url: String(url), query: body.query, variables: body.variables });
+  requests.push({ url: String(url), query: body.query, variables: body.variables, headers: new Headers(init?.headers) });
   const root = body.query.includes("IndexedSwap(") ? "IndexedSwap" : "IndexedFeeEvent";
   return Response.json({ data: { [root]: [] } });
 }) as typeof fetch;
@@ -54,4 +59,11 @@ test("swaps: keyset paging", async () => {
   expect(r.variables.fromLogIndex).toBe(3);
   expect(r.query).toContain("{ blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }");
   expect(r.query).toContain('order_by: [{ blockNumber: asc }, { logIndex: asc }]');
+});
+
+test("the admin secret goes only to the indexer it's configured for", async () => {
+  await fetchIndexedSwapsPage("base", "0xt", cursorAfterBlock("0"));
+  await fetchIndexedSwapsPage("robinhood", "0xt", cursorAfterBlock("0"));
+  expect(requests[0].headers.get("x-hasura-admin-secret")).toBe("base-secret");
+  expect(requests[1].headers.get("x-hasura-admin-secret")).toBeNull();
 });
