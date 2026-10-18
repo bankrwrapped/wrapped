@@ -56,6 +56,8 @@ Optional:
 ROBINHOOD_RPC_URL         # defaults to the public endpoint
 WRAPPED_WEBHOOK_SECRET    # needed for "Wrapped ready" notifications; skipped (logged) while unset
 EARNINGS_SOURCE           # "indexer" shows the indexer's earnings (when ok and complete); anything else, Bankr's
+ENVIO_HASURA_ADMIN_SECRET_BASE       # the Base indexer Hasura's HASURA_GRAPHQL_ADMIN_SECRET; required since its re-index (anonymous queries are rejected)
+ENVIO_HASURA_ADMIN_SECRET_ROBINHOOD  # same for Robinhood, if its Hasura has one
 WRAPPED_TRUSTED_CLIENT_KEYS  # comma-separated keys (16+ chars); X-Wrapped-Client-Key gets a 600/min bucket instead of 20/min per IP
 PORT                      # default 4000
 ```

@@ -26,6 +26,12 @@ export const env = {
   // A single shared URL cannot serve both chains — see envioClient.ts.
   ENVIO_GRAPHQL_URL_BASE: required("ENVIO_GRAPHQL_URL_BASE"),
   ENVIO_GRAPHQL_URL_ROBINHOOD: required("ENVIO_GRAPHQL_URL_ROBINHOOD"),
+  // Hasura admin secret per indexer, sent as x-hasura-admin-secret. Needed
+  // once an indexer's Hasura has one set (the Base indexer's does since its
+  // 2026-10-17 re-index: anonymous queries get "x-hasura-admin-secret ...
+  // required"). Server-side only. Unset = no header, as before.
+  ENVIO_HASURA_ADMIN_SECRET_BASE: process.env.ENVIO_HASURA_ADMIN_SECRET_BASE || undefined,
+  ENVIO_HASURA_ADMIN_SECRET_ROBINHOOD: process.env.ENVIO_HASURA_ADMIN_SECRET_ROBINHOOD || undefined,
   // Module 14: X OAuth 2.0 (Web App / confidential client, registered in
   // X's Developer Console). Client Secret is what makes it confidential -
   // required for the token exchange, unlike a public/SPA client.
