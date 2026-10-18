@@ -98,4 +98,4 @@ scripts/
 
 `GET /api/status` shows how far the Base indexer has got (block, percent, speed, ETA) and the token backfill counts. It's public, cached for 30 seconds, and returns only counts and block numbers. The ETA appears about 5 minutes after the API starts, once it has two speed samples.
 
-Diagnostics hit real services and need a real `.env`. Run them by hand, for example `bun run scripts/diagnostics/builder-volume.ts <wallet>`. `compare-earnings.ts` prints Bankr's and the indexer's earnings side by side (`<handles...>` or `--top N`, `--tokens` for per-token detail).
+Diagnostics hit real services and need a real `.env`. Run them by hand, for example `bun run scripts/diagnostics/builder-volume.ts <wallet>`. `webhook-secret.ts` checks that the API's `WRAPPED_WEBHOOK_SECRET` matches the wrapped-ready webhook's, without anything being posted: it sends an unparseable body, correctly signed and then wrongly signed. `compare-earnings.ts` prints Bankr's and the indexer's earnings side by side (`<handles...>` or `--top N`, `--tokens` for per-token detail).
