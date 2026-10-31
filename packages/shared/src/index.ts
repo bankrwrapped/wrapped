@@ -229,3 +229,145 @@ export interface TopTraderEntry {
   unclaimedEth: number;
   updatedAt: string;
 }
+
+// ---- Category leaderboards (GET /api/leaderboards) ----
+
+export type BoardId =
+  | "earnings"
+  | "month"
+  | "best_day"
+  | "streak"
+  | "launches"
+  | "please_bro"
+  | "per_launch"
+  | "hit_rate"
+  | "breakout";
+
+export type BoardUnit = "eth" | "days" | "count" | "percent" | "multiple";
+
+export interface BoardDefinition {
+  id: BoardId;
+  title: string;
+  // One line on what the board rewards.
+  description: string;
+  // How the score is computed, shown verbatim under the board so nobody has
+  // to guess why they rank where they do.
+  formula: string;
+  // Minimum to appear on the board, or null when any nonzero score counts.
+  qualify: string | null;
+  unit: BoardUnit;
+}
+
+// Per-token fees are Bankr's recent figures (claimed in the last 90 days +
+// claimable now), so the boards built on them say so in their formula.
+export const BOARDS: BoardDefinition[] = [
+  {
+    id: "earnings",
+    title: "Top earners",
+    description: "Total ETH earned from launch fees, your own launches and Please Bro.",
+    formula: "Score = creator earnings + Please Bro earnings, claimed + unclaimed, in ETH",
+    qualify: null,
+    unit: "eth",
+  },
+  {
+    id: "month",
+    title: "This month",
+    description: "ETH claimed during the current month. Resets on the 1st (UTC).",
+    formula: "Score = sum of ETH claimed on each day of the month (UTC)",
+    qualify: null,
+    unit: "eth",
+  },
+  {
+    id: "best_day",
+    title: "Biggest single day",
+    description: "Your best claim day ever.",
+    formula: "Score = the most ETH claimed in one UTC day",
+    qualify: null,
+    unit: "eth",
+  },
+  {
+    id: "streak",
+    title: "Longest streak",
+    description: "Consecutive days with a claim.",
+    formula: "Score = longest run of consecutive claim days in the last 90 days",
+    qualify: null,
+    unit: "days",
+  },
+  {
+    id: "launches",
+    title: "Most launches",
+    description: "Tokens launched through Bankr.",
+    formula: "Score = tokens launched (Doppler, Clanker v3.1 and v4)",
+    qualify: null,
+    unit: "count",
+  },
+  {
+    id: "please_bro",
+    title: "Please Bro royalty",
+    description: "Tokens other people launched with you as a fee beneficiary.",
+    formula: "Score = Please Bro tokens",
+    qualify: null,
+    unit: "count",
+  },
+  {
+    id: "per_launch",
+    title: "Most per launch",
+    description: "Quality over quantity.",
+    formula: "Score = creator earnings ÷ tokens launched, in ETH",
+    qualify: "At least 3 launches",
+    unit: "eth",
+  },
+  {
+    id: "hit_rate",
+    title: "Hit rate",
+    description: "How often a launch actually earns.",
+    formula: "Score = share of your launches with at least 0.1 ETH in recent fees (claimed in the last 90 days + unclaimed)",
+    qualify: "At least 5 launches",
+    unit: "percent",
+  },
+  {
+    id: "breakout",
+    title: "Breakout",
+    description: "One token that blew past the rest of your launches.",
+    formula: "Score = your top token's recent fees ÷ the average recent fees across your launches",
+    qualify: "At least 3 launches, top token at least 0.1 ETH",
+    unit: "multiple",
+  },
+];
+
+export interface BoardEntry {
+  rank: number;
+  // Shares its score (and so its rank) with at least one other wallet.
+  tied: boolean;
+  score: number;
+  walletAddress: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+}
+
+export interface BoardResult {
+  id: BoardId;
+  // Wallets that qualify for this board.
+  total: number;
+  entries: BoardEntry[];
+  // The requested handle's row, when it qualifies; and the rows directly
+  // above and below it (null at either end of the board).
+  personal: BoardEntry | null;
+  neighbors: { above: BoardEntry | null; below: BoardEntry | null };
+}
+
+export interface MonthEdition {
+  // "YYYY-MM", UTC.
+  month: string;
+  // When the edition ends: the 1st of the following month, 00:00 UTC.
+  closesAt: string;
+  // A past month: the final standings, no longer changing.
+  frozen: boolean;
+}
+
+export interface LeaderboardsResponse {
+  // Applies to the "month" board only; every other board is all-time.
+  edition: MonthEdition;
+  boards: BoardResult[];
+}

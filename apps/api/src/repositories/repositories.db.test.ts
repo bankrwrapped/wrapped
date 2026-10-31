@@ -258,6 +258,33 @@ describe.skipIf(!ADMIN_URL)("repositories (real Postgres)", () => {
     expect(await repos.wrapped.claimReadyNotification("0xmissing")).toBeNull();
   });
 
+  test("listBoardMetrics sums the month's claims and lists launched-token fees only", async () => {
+    const p = payload("0xboard", 3, 3, 0);
+    p.tokens = [
+      { ...p.tokens[0], tokenAddress: "0xa", feesEarnedEth: 0.5 },
+      { ...p.tokens[0], tokenAddress: "0xb", feesEarnedEth: 0.25 },
+    ];
+    p.pleaseBroTokens = [{ ...p.tokens[0], tokenAddress: "0xpb", feesEarnedEth: 9 }];
+    p.summary.tokensLaunched = 2;
+    p.bestDay = { date: "2026-08-02", eth: 1.5 };
+    p.longestStreakDays = 4;
+    p.dailyEarnings = [
+      { date: "2026-09-30", eth: 7 },
+      { date: "2026-10-01", eth: 0.25 },
+      { date: "2026-10-31", eth: 0.5 },
+      { date: "2026-11-01", eth: 7 },
+    ];
+    await repos.wrapped.upsert("0xboard", "board", p);
+    // An old payload with no dailyEarnings array at all still reads.
+    await repos.wrapped.upsert("0xbare", "bare", { ...payload("0xbare", 1, 1, 0), dailyEarnings: undefined, bestDay: undefined });
+
+    const rows = await repos.wrapped.listBoardMetrics("2026-10-01", "2026-11-01");
+    const m = rows.find((r) => r.walletAddress === "0xboard")!;
+    expect(m).toMatchObject({ monthEth: 0.75, bestDayEth: 1.5, streakDays: 4, tokensLaunched: 2, creatorEth: 3, totalEth: 3 });
+    expect(m.tokenFees.sort()).toEqual([0.25, 0.5]);
+    expect(rows.find((r) => r.walletAddress === "0xbare")).toMatchObject({ monthEth: 0, bestDayEth: 0 });
+  });
+
   test("refresh commit is atomic and only applies if the checkpoint hasn't moved", async () => {
     await raw`insert into indexed_tokens (chain, token_address, source, backfill_status, backfill_checkpoint_block)
               values ('base', '0xcp', 'doppler', 'complete', 100)`;

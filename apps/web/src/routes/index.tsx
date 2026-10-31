@@ -6,16 +6,17 @@
 //   signed-out  → Landing
 //   error       → Landing (handles its own auth-error affordance)
 //   no-account  → NoAccountState (signed in, no Bankr wallet resolved)
-//   signed-in   → fetch wrapped by handle, then run the reveal
+//   signed-in   → fetch wrapped by handle, then the card deck
 //
-// The WebGL braid reveal is being rebuilt — RevealPlaceholder stands in for
-// it so the app boots. Auth branching below is final and should not need to
-// change when the real reveal lands; it just replaces RevealPlaceholder.
+// The WebGL braid reveal is being rebuilt; when it lands it plays before
+// WrappedDeck, which stays as the shareable card view after it.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { BuildingWrappedState } from "@/components/wrapped/BuildingWrappedState";
 import { NoAccountState } from "@/components/wrapped/NoAccountState";
+import { WrappedDeck } from "@/components/wrapped/WrappedDeck";
 import { Landing } from "@/components/wrapped/Landing";
 import { useAuth } from "@/hooks/use-auth";
 import { lookupWrapped, type WrappedProfile } from "@/lib/wrapped-data";
@@ -54,13 +55,20 @@ function reload() {
   if (typeof window !== "undefined") window.location.assign("/");
 }
 
+// Trading volume is computed in the background: re-ask while it's pending
+// or still filling in, so the volume card updates without a reload.
+const VOLUME_POLL_MS = 30_000;
+const VOLUME_POLL_MAX = 20;
+
 // Signed-in branch: fetch the wrapped profile by handle (Option A — backend
-// resolves handle→wallet→data on the existing route), then run the reveal.
-// Note: no-activity users are NOT gated out — they run the same reveal with
+// resolves handle→wallet→data on the existing route), then show the cards.
+// Note: no-activity users are NOT gated out — they get the same deck with
 // honest small numbers (locked decision).
 function SignedIn({ xUsername }: { xUsername: string }) {
   const [profile, setProfile] = useState<WrappedProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [intro, setIntro] = useState(true);
+  const endIntro = useCallback(() => setIntro(false), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,26 +86,24 @@ function SignedIn({ xUsername }: { xUsername: string }) {
     };
   }, [xUsername]);
 
+  const volumeSettled = profile ? profile.tradingVolume.status === "ok" && profile.tradingVolume.isComplete : true;
+  useEffect(() => {
+    if (volumeSettled) return;
+    let polls = 0;
+    const t = setInterval(() => {
+      if (++polls > VOLUME_POLL_MAX) return clearInterval(t);
+      // A failed poll just waits for the next one; the cards already shown stay.
+      lookupWrapped(xUsername).then(setProfile, () => {});
+    }, VOLUME_POLL_MS);
+    return () => clearInterval(t);
+  }, [volumeSettled, xUsername]);
+
   if (error) return <LoadError message={error} />;
-  if (!profile) return <Checking />;
+  if (intro || !profile) {
+    return <BuildingWrappedState apiDone={profile !== null} onDone={endIntro} handle={xUsername} avatarUrl={null} />;
+  }
 
-  return <RevealPlaceholder profile={profile} />;
-}
-
-// Placeholder for the WebGL braid reveal (being rebuilt). Shows the real
-// resolved profile data so the signed-in path is verifiable end to end.
-function RevealPlaceholder({ profile }: { profile: WrappedProfile }) {
-  return (
-    <div style={centered}>
-      <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <span style={checkingText}>{"> reveal coming soon"}</span>
-        <span style={{ ...checkingText, opacity: 0.6, fontSize: "0.8rem" }}>
-          signed in as @{profile.handle} · {profile.tokensLaunched} launched ·{" "}
-          {profile.pleaseBro.length} please bro
-        </span>
-      </div>
-    </div>
-  );
+  return <WrappedDeck profile={profile} />;
 }
 
 function Checking() {

@@ -14,6 +14,22 @@ interface ProfileRow {
 // request (see wrappedService.attachRank), never persisted, so this
 // repository never has real values for them and shouldn't claim to.
 export type PersistedWrappedRow = Omit<WrappedCacheRow, "rank" | "totalUsers" | "percentile">;
+
+export interface BoardMetrics {
+  walletAddress: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+  totalEth: number;
+  creatorEth: number;
+  tokensLaunched: number;
+  pleaseBroCount: number;
+  firstIndexedAt: string;
+  bestDayEth: number;
+  streakDays: number;
+  monthEth: number;
+  tokenFees: number[];
+}
 // Rows written by the old updateTradingVolume hold tradingVolume as a JSON
 // string (see the note there). schema.sql repairs them in place; this keeps
 // them readable until it has been run.
@@ -208,6 +224,65 @@ export const wrappedCacheRepository = {
       totalEarningsEth: Number(r.total_earnings_eth),
       unclaimedEth: Number(r.unclaimed_eth),
       updatedAt: new Date(r.updated_at).toISOString(),
+    }));
+  },
+
+  // One row per profile with everything the category leaderboards rank on
+  // (services/leaderboards.ts). monthEth sums payload.dailyEarnings over
+  // [monthFrom, monthTo) - "YYYY-MM-DD" strings compare in date order.
+  // tokenFees: recent fees per launched token, from wrapped_tokens.
+  async listBoardMetrics(monthFrom: string, monthTo: string): Promise<BoardMetrics[]> {
+    const rows = (await db`
+      select p.wallet_address, p.username, p.display_name, p.avatar_url,
+             p.total_earnings_eth::float8 as total_eth,
+             p.creator_earnings_eth::float8 as creator_eth,
+             p.tokens_launched, p.please_bro_count, p.first_indexed_at,
+             coalesce((p.payload->'bestDay'->>'eth')::float8, 0) as best_day_eth,
+             coalesce((p.payload->>'longestStreakDays')::int, 0) as streak_days,
+             coalesce((
+               select sum((d->>'eth')::float8)
+               from jsonb_array_elements(
+                 case when jsonb_typeof(p.payload->'dailyEarnings') = 'array'
+                      then p.payload->'dailyEarnings' else '[]'::jsonb end
+               ) d
+               where d->>'date' >= ${monthFrom} and d->>'date' < ${monthTo}
+             ), 0) as month_eth,
+             coalesce((
+               select jsonb_agg(t.fees_earned_eth::float8)
+               from wrapped_tokens t
+               where t.wallet_address = p.wallet_address and t.category = 'launched'
+             ), '[]'::jsonb) as token_fees
+      from wrapped_profiles p
+    `) as Array<{
+      wallet_address: string;
+      username: string;
+      display_name: string;
+      avatar_url: string;
+      total_eth: number;
+      creator_eth: number;
+      tokens_launched: number;
+      please_bro_count: number;
+      first_indexed_at: string;
+      best_day_eth: number;
+      streak_days: number;
+      month_eth: number;
+      token_fees: number[];
+    }>;
+
+    return rows.map((r) => ({
+      walletAddress: r.wallet_address,
+      username: r.username,
+      displayName: r.display_name,
+      avatarUrl: r.avatar_url,
+      totalEth: Number(r.total_eth),
+      creatorEth: Number(r.creator_eth),
+      tokensLaunched: r.tokens_launched,
+      pleaseBroCount: r.please_bro_count,
+      firstIndexedAt: new Date(r.first_indexed_at).toISOString(),
+      bestDayEth: Number(r.best_day_eth),
+      streakDays: Number(r.streak_days),
+      monthEth: Number(r.month_eth),
+      tokenFees: (Array.isArray(r.token_fees) ? r.token_fees : []).map(Number),
     }));
   },
 

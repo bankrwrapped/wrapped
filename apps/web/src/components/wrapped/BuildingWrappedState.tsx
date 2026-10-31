@@ -13,6 +13,22 @@ const STEPS = [
 ];
 const STEP_INTERVAL_MS = 700;
 
+// Rotates under the steps while the real lookup is still running, so a slow
+// Bankr response reads as part of the bit instead of a hang.
+const QUIPS = [
+  "Counting your launches…",
+  "Reading the fee locker…",
+  "Asking Clanker nicely…",
+  "Weighing your Please Bros…",
+  "Tallying the claims…",
+  "Finding your best day…",
+  "Checking the streaks…",
+  "Sniffing out your theme…",
+  "Picking your builder type…",
+  "Polishing your cards…",
+];
+const QUIP_INTERVAL_MS = 1800;
+
 type Props = {
   apiDone: boolean;
   onDone: () => void;
@@ -35,6 +51,7 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
   // but before the timeout fired, permanently losing the scheduled call.
   // A ref survives that re-run and guarantees onDone fires exactly once.
   const doneRef = useRef(false);
+  const [quip, setQuip] = useState(0);
   const lastStep = STEPS.length - 1;
   const cleanHandle = handle.trim().replace(/^@/, "");
 
@@ -43,6 +60,12 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
     const t = setTimeout(() => setActiveStep((s) => s + 1), STEP_INTERVAL_MS);
     return () => clearTimeout(t);
   }, [activeStep, lastStep]);
+
+  useEffect(() => {
+    if (apiDone) return;
+    const t = setInterval(() => setQuip((q) => (q + 1) % QUIPS.length), QUIP_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [apiDone]);
 
   useEffect(() => {
     if (apiDone && activeStep >= lastStep && !doneRef.current) {
@@ -163,6 +186,12 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
             );
           })}
         </motion.ul>
+
+        {!apiDone && activeStep >= lastStep && (
+          <p aria-live="polite" className="font-mono text-sm text-accent">
+            {QUIPS[quip]}
+          </p>
+        )}
       </div>
 
       {/* Closing flourish - one bright pulse right before handoff */}

@@ -1,4 +1,4 @@
-import { getLeaderboardController, getWrappedController } from "./controllers/wrappedController";
+import { getLeaderboardController, getLeaderboardsController, getWrappedController } from "./controllers/wrappedController";
 import { startXLogin, handleXCallback, getMe } from "./controllers/authController";
 import {
   checkAuthMeRouteLimit,
@@ -201,6 +201,17 @@ Bun.serve({
         console.error("[api] leaderboard request failed:", err);
         return withCors(Response.json(
           { error: "Couldn't load the leaderboard right now. Try again in a moment." },
+          { status: 500 }
+        ), req);
+      }
+    }
+    if (url.pathname === "/api/leaderboards" && req.method === "GET") {
+      try {
+        return withCors(await getLeaderboardsController(url), req);
+      } catch (err) {
+        console.error("[api] leaderboards request failed:", err);
+        return withCors(Response.json(
+          { error: "Couldn't load the leaderboards right now. Try again in a moment." },
           { status: 500 }
         ), req);
       }

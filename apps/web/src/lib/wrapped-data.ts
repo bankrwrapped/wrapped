@@ -2,7 +2,10 @@
 // API builds its responses from. This file used to hand-copy them, and the
 // copy had already drifted (no tradingVolume, no earningsFromIndexer).
 import type {
+  BoardDefinition,
+  BoardEntry,
   Chain,
+  LeaderboardsResponse,
   FeesFetchStatus,
   WrappedCacheRow,
   WrappedPayload,
@@ -222,5 +225,55 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
     return (data.entries ?? []).map((e) => ({ ...e, avatarUrl: upscaleAvatar(e.avatarUrl) }));
   } catch {
     return [];
+  }
+}
+
+export type {
+  BoardDefinition,
+  BoardEntry,
+  BoardId,
+  BoardResult,
+  LeaderboardsResponse,
+  MonthEdition,
+} from "@bankr-wrapped/shared";
+export { BOARDS } from "@bankr-wrapped/shared";
+
+// Category boards. `month` ("YYYY-MM") picks the current or previous edition
+// of the monthly board; `handle` adds that handle's row and neighbors.
+export async function fetchLeaderboards(opts: { month?: string; handle?: string } = {}): Promise<LeaderboardsResponse> {
+  const params = new URLSearchParams();
+  if (opts.month) params.set("month", opts.month);
+  if (opts.handle) params.set("handle", opts.handle.replace(/^@/, ""));
+  const qs = params.toString();
+  const res = await fetch(`${API_URL}/api/leaderboards${qs ? `?${qs}` : ""}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Request failed with status ${res.status}`);
+  }
+  const data: LeaderboardsResponse = await res.json();
+  const upscale = (e: BoardEntry | null) => (e ? { ...e, avatarUrl: upscaleAvatar(e.avatarUrl) } : null);
+  return {
+    ...data,
+    boards: data.boards.map((b) => ({
+      ...b,
+      entries: b.entries.map((e) => upscale(e)!),
+      personal: upscale(b.personal),
+      neighbors: { above: upscale(b.neighbors.above), below: upscale(b.neighbors.below) },
+    })),
+  };
+}
+
+export function formatBoardScore(score: number, unit: BoardDefinition["unit"]): string {
+  switch (unit) {
+    case "eth":
+      return formatEth(score);
+    case "days":
+      return `${score} ${score === 1 ? "day" : "days"}`;
+    case "count":
+      return String(score);
+    case "percent":
+      return `${Math.round(score * 100)}%`;
+    case "multiple":
+      return `${score.toFixed(1)}×`;
   }
 }
