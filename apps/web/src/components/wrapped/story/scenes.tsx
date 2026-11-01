@@ -430,7 +430,9 @@ function VolumeScene({ p }: { p: WrappedProfile }) {
     const t = setInterval(() => setQ((n) => (n + 1) % VOLUME_QUIPS.length), 1400);
     return () => clearInterval(t);
   }, [v.status]);
-  if (v.status === "pending") {
+  // Anything but a real number (pending, or it resolved to nothing while the
+  // story was already playing) shows the counting slide, never a $0.
+  if (v.status !== "ok" || v.totalVolumeUsd <= 0) {
     return (
       <Stage>
         <Eyebrow>Your impact</Eyebrow>
@@ -590,7 +592,8 @@ export function buildScenes(ctx: CardContext): Scene[] {
     has("top-token", ctx) && { id: "top-token", duration: bars(4), palette: P.top, cut: "iris", energy: 3, render: (c) => <TopTokenScene p={c.profile} /> },
     has("themes", ctx) && { id: "themes", duration: bars(3), palette: P.themes, cut: "wipe", energy: 2, render: (c) => <ThemesScene p={c.profile} /> },
     has("rhythm", ctx) && { id: "rhythm", duration: bars(4), palette: P.rhythm, cut: "zoom", energy: 3, render: (c) => <RhythmScene p={c.profile} /> },
-    p.tokensLaunched > 0 && { id: "volume", duration: bars(3), palette: P.volume, cut: "whip", energy: 2, render: (c) => <VolumeScene p={c.profile} /> },
+    // Pending volume gets the "still counting" scene; it may land mid-story.
+    (has("volume", ctx) || (p.tokensLaunched > 0 && p.tradingVolume.status === "pending")) && { id: "volume", duration: bars(3), palette: P.volume, cut: "whip", energy: 2, render: (c) => <VolumeScene p={c.profile} /> },
     has("verdict", ctx) && { id: "verdict", duration: bars(4), palette: P.verdict, cut: "flash", energy: 4, render: (c) => <VerdictScene p={c.profile} /> },
     has("rankings", ctx) && { id: "ranks", duration: bars(3), palette: P.ranks, cut: "iris", energy: 3, render: (c) => <RanksScene boards={c.boards ?? []} /> },
     { id: "outro", duration: bars(3), palette: P.outro, cut: "fade", energy: 1, render: (c) => <OutroScene cards={CARDS.filter((d) => d.available(c)).length} /> },

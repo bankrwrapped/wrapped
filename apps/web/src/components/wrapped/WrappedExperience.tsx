@@ -23,6 +23,7 @@ function notices(p: WrappedProfile): string[] {
   }
   if (p.earningsPartial) out.push("Some fees couldn't be priced and count as 0, so earnings show as “at least”.");
   if (p.tradingVolume.status === "pending") out.push("Your trading volume is still being counted. Its card appears here when it's ready.");
+  if (p.tradingVolume.status === "unavailable") out.push("We couldn't count your trading volume right now, so its card is missing. Reload later to try again.");
   return out;
 }
 

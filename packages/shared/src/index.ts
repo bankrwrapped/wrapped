@@ -329,7 +329,7 @@ export const BOARDS: BoardDefinition[] = [
     id: "breakout",
     title: "Breakout",
     description: "One token that blew past the rest of your launches.",
-    formula: "Score = your top token's recent fees ÷ the average recent fees across your launches",
+    formula: "Score = your top token's recent fees ÷ the average recent fees of your other launches (at least 0.01 ETH)",
     qualify: "At least 3 launches, top token at least 0.1 ETH",
     unit: "multiple",
   },
@@ -362,7 +362,8 @@ export interface MonthEdition {
   month: string;
   // When the edition ends: the 1st of the following month, 00:00 UTC.
   closesAt: string;
-  // A past month: the final standings, no longer changing.
+  // A past month: closed to new entrants. Not a snapshot - a profile's
+  // October claims indexed in November still count toward October.
   frozen: boolean;
 }
 

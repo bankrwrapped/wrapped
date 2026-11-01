@@ -43,9 +43,13 @@ export type WrappedProfile = {
   earningsPartial: boolean;
   // Earliest known Bankr launch (Clanker v3.1, 2025) when there is one.
   firstLaunch: NonNullable<WrappedPayload["summary"]["firstLaunch"]> | null;
-  // "pending" = not computed yet (don't show a number); isComplete false =
-  // a floor that's still being filled in ("at least").
-  tradingVolume: Pick<WrappedTradingVolume, "totalVolumeUsd" | "status" | "isComplete">;
+  // "pending" = not computed yet (don't show a number); "none" = never will be
+  // (no Base/Robinhood launches, which is all the API counts volume for);
+  // "unavailable" = gave up waiting for it. isComplete false = a floor that's
+  // still being filled in ("at least").
+  tradingVolume: Pick<WrappedTradingVolume, "totalVolumeUsd" | "isComplete"> & {
+    status: WrappedTradingVolume["status"] | "none" | "unavailable";
+  };
   bestDay: { date: string; eth: number } | null;
   dailyEarnings: { date: string; eth: number }[];
   claimCount: number;
@@ -90,7 +94,11 @@ function upscaleAvatar(url: string): string {
 
 // Older cached rows hold tradingVolume as a JSON string (fixed in the API;
 // repaired by schema.sql) - read either form.
-function readTradingVolume(raw: unknown): WrappedProfile["tradingVolume"] {
+// The API only computes volume for Base and Robinhood launches
+// (buildVolumeTokenRefs); without one, a "pending" result never resolves.
+const VOLUME_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
+
+function readTradingVolume(raw: unknown, tokens: WrappedTokenEntry[]): WrappedProfile["tradingVolume"] {
   let tv = raw;
   if (typeof tv === "string") {
     try {
@@ -100,7 +108,10 @@ function readTradingVolume(raw: unknown): WrappedProfile["tradingVolume"] {
     }
   }
   const v = tv as Partial<WrappedTradingVolume> | null;
-  if (!v || v.status !== "ok") return { totalVolumeUsd: 0, status: "pending", isComplete: false };
+  if (!v || v.status !== "ok") {
+    const counted = tokens.some((t) => VOLUME_CHAINS.has(t.chain));
+    return { totalVolumeUsd: 0, status: counted ? "pending" : "none", isComplete: false };
+  }
   return { totalVolumeUsd: v.totalVolumeUsd ?? 0, status: "ok", isComplete: v.isComplete === true };
 }
 
@@ -125,7 +136,7 @@ export function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     totalEth: payload.earnings.totalEth,
     earningsPartial: payload.meta.earningsPartial === true,
     firstLaunch: payload.summary.firstLaunch ?? null,
-    tradingVolume: readTradingVolume(payload.tradingVolume),
+    tradingVolume: readTradingVolume(payload.tradingVolume, payload.tokens ?? []),
     bestDay: payload.bestDay,
     dailyEarnings: payload.dailyEarnings,
     claimCount: payload.claimCount,

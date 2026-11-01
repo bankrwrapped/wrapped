@@ -19,9 +19,12 @@ export function useRanks(handle: string): BoardResult[] | null {
 
 // Boards where the handle places in the top half, best placing (by share
 // of the board) first. A bottom-of-the-board rank isn't worth a slide.
+// Placing is measured by how many rank ahead, (rank - 1) / total, so #1 always
+// counts, even on a board only this wallet qualifies for (1 / 1 would not).
 export function topPlacings(boards: BoardResult[] | null, limit = 4): BoardResult[] {
+  const ahead = (b: BoardResult) => (b.personal!.rank - 1) / b.total;
   return (boards ?? [])
-    .filter((b) => b.personal && b.personal.rank / b.total <= 0.5)
-    .sort((a, b) => a.personal!.rank / a.total - b.personal!.rank / b.total)
+    .filter((b) => b.personal && ahead(b) < 0.5)
+    .sort((a, b) => ahead(a) - ahead(b))
     .slice(0, limit);
 }

@@ -6,9 +6,11 @@
 // The "month" board is a monthly edition: the current UTC month, or the
 // previous one as its final standings. Past months are recomputed from each
 // profile's dailyEarnings (90 days, so the previous month is always fully in
-// range) rather than snapshotted, so "frozen" is enforced by counting only
-// profiles that existed before the month closed - claims already made don't
-// change, and nobody can join a closed edition.
+// range) rather than snapshotted. "frozen" means closed to new entrants:
+// only profiles that existed before the month closed count. Their totals can
+// still rise when a refresh indexes claims they made in that month; a
+// snapshot would lock in those late-indexed months as too low, so the UI
+// says the totals can still fill in rather than calling them final.
 import {
   BOARDS,
   type BoardEntry,
@@ -21,6 +23,9 @@ import { wrappedCacheRepository, type BoardMetrics } from "../repositories/wrapp
 
 const CACHE_MS = 60_000;
 const HIT_ETH = 0.1;
+// Breakout's baseline floor: launches that earned ~nothing would otherwise
+// make any top token an infinite multiple.
+const BREAKOUT_FLOOR_ETH = 0.01;
 
 type Scorer = (m: BoardMetrics) => number | null;
 
@@ -38,11 +43,14 @@ const SCORERS: Record<BoardId, Scorer> = {
   per_launch: (m) => (m.tokensLaunched >= 3 ? m.creatorEth / m.tokensLaunched : null),
   hit_rate: (m) =>
     m.tokenFees.length >= 5 ? m.tokenFees.filter((f) => f >= HIT_ETH).length / m.tokenFees.length : null,
+  // Top token against the average of the *other* launches. Dividing by the
+  // average of all of them (top included) caps the score at the launch count,
+  // so it rewarded launching a lot rather than one token standing out.
   breakout: (m) => {
     if (m.tokenFees.length < 3) return null;
-    const top = Math.max(...m.tokenFees);
-    const avg = average(m.tokenFees);
-    return top >= HIT_ETH && avg > 0 ? top / avg : null;
+    const fees = [...m.tokenFees].sort((a, b) => b - a);
+    const top = fees[0];
+    return top >= HIT_ETH ? top / Math.max(average(fees.slice(1)), BREAKOUT_FLOOR_ETH) : null;
   },
 };
 
@@ -71,9 +79,11 @@ export function rankBoard(
   const scored = metrics
     .map((m) => ({ m, score: SCORERS[id](m) }))
     .filter((x): x is { m: BoardMetrics; score: number } => x.score !== null && Number.isFinite(x.score) && x.score > 0)
+    // Scores that count as a tie (sameScore) must sort as equal too, or
+    // float noise in the last bits would decide the order within a tie.
     .sort(
       (a, b) =>
-        b.score - a.score ||
+        (sameScore(a.score, b.score) ? 0 : b.score - a.score) ||
         a.m.firstIndexedAt.localeCompare(b.m.firstIndexedAt) ||
         a.m.walletAddress.localeCompare(b.m.walletAddress)
     );

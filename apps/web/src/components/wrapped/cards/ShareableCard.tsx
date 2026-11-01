@@ -104,6 +104,42 @@ export function ShareActions({
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   useEffect(() => setStatus({ kind: "idle" }), [id]);
 
+  // The PNG is rendered ahead of the click: browsers only allow sharing and
+  // clipboard writes close to the user's tap, and a 3x render can take over a
+  // second (long enough for iOS to refuse navigator.share). It's re-rendered
+  // when the face's content changes (a count-up settling, a volume update).
+  const png = useRef<{ node: HTMLElement; blob: Promise<Blob> } | null>(null);
+  const image = (node: HTMLElement): Promise<Blob> => {
+    if (png.current?.node !== node) {
+      const blob = renderCard(node);
+      const entry = { node, blob };
+      png.current = entry;
+      blob.catch(() => {
+        if (png.current === entry) png.current = null;
+      });
+    }
+    return png.current!.blob;
+  };
+  useEffect(() => {
+    png.current = null;
+    const node = faceRef.current;
+    if (!node) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const warm = () => {
+      clearTimeout(timer);
+      png.current = null;
+      timer = setTimeout(() => void image(node).catch(() => {}), 600);
+    };
+    warm();
+    const mo = new MutationObserver(warm);
+    mo.observe(node, { childList: true, characterData: true, subtree: true });
+    return () => {
+      clearTimeout(timer);
+      mo.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, faceRef]);
+
   const run = async (label: string, action: (node: HTMLElement) => Promise<void>) => {
     if (!faceRef.current || status.kind === "busy") return;
     setStatus({ kind: "busy" });
@@ -119,7 +155,7 @@ export function ShareActions({
 
   const save = () =>
     run("Saved", async (node) => {
-      const blob = await renderCard(node);
+      const blob = await image(node);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `bankr-wrapped-${handle}-${id}.png`;
@@ -133,7 +169,7 @@ export function ShareActions({
   // ClipboardItem gets the render as a promise rather than a finished blob.
   const copy = () =>
     run("Copied. Paste it into your post", async (node) => {
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": renderCard(node) })]);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": image(node) })]);
     });
 
   const post = () => {
@@ -141,22 +177,25 @@ export function ShareActions({
     const intent = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
     const phone = typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches;
     if (phone) {
-      // The native share sheet can attach the image itself.
+      // The native share sheet can attach the image itself. The image is
+      // normally pre-rendered, so share() still runs within the tap.
       return run("Shared", async (node) => {
-        const blob = await renderCard(node);
+        const blob = await image(node);
         const file = new File([blob], `bankr-wrapped-${id}.png`, { type: "image/png" });
         if (navigator.canShare({ files: [file], text })) await navigator.share({ files: [file], text });
         else window.location.assign(intent);
       });
     }
-    // Desktop: X has to open inside the click or it's popup-blocked, and an
-    // intent can't carry an image, so the card goes on the clipboard to paste.
-    window.open(intent, "_blank", "noopener,noreferrer");
+    // Desktop: an intent can't carry an image, so the card goes on the
+    // clipboard to paste. The write starts first, while this page still has
+    // focus (opening X takes it away and Chrome then refuses the write); X
+    // still opens inside the click so it isn't popup-blocked.
     if (canCopy) {
       void run("Image copied. Paste it into your post", async (node) => {
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": renderCard(node) })]);
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": image(node) })]);
       });
     }
+    window.open(intent, "_blank", "noopener,noreferrer");
   };
 
   const btn =

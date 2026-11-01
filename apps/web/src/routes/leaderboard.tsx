@@ -140,7 +140,7 @@ function LeaderboardPage() {
   const auth = useAuth();
   const handle = auth.status === "signed-in" || auth.status === "no-account" ? auth.xUsername : undefined;
   const [boardId, setBoardId] = useState<BoardId>("earnings");
-  // undefined = the current edition; set to view last month's final standings.
+  // undefined = the current edition; set to view last month's closed edition.
   const [month, setMonth] = useState<string | undefined>(undefined);
   const [data, setData] = useState<LeaderboardsResponse | null>(null);
   const [failed, setFailed] = useState(false);
@@ -248,7 +248,7 @@ function LeaderboardPage() {
               </button>
               <span className="font-mono text-xs text-muted-foreground">
                 {edition.frozen
-                  ? `The ${monthLabel(edition.month)} leaderboard is closed. Final standings.`
+                  ? `The ${monthLabel(edition.month)} leaderboard is closed to new entries. Totals can still fill in as late claims are indexed.`
                   : `Closes in ${closesIn(edition.closesAt)}`}
               </span>
             </div>

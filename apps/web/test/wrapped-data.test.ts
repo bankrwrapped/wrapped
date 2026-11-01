@@ -94,8 +94,11 @@ test("trading volume: object, legacy string, or not computed yet", () => {
       row({ tradingVolume: JSON.stringify({ totalVolumeUsd: 9, status: "ok", isComplete: true }) }),
     ).tradingVolume,
   ).toEqual({ totalVolumeUsd: 9, status: "ok", isComplete: true });
+  const pending = { status: "pending", totalVolumeUsd: 0 };
   expect(
-    mapToProfile(row({ tradingVolume: { status: "pending", totalVolumeUsd: 0 } })).tradingVolume
-      .status,
+    mapToProfile(row({ tradingVolume: pending, tokens: [{ chain: "base" }] })).tradingVolume.status,
   ).toBe("pending");
+  // With no launches the API never computes volume, so it would stay pending.
+  expect(mapToProfile(row({ tradingVolume: pending })).tradingVolume.status).toBe("none");
+  expect(mapToProfile(row({ tradingVolume: undefined })).tradingVolume.status).toBe("none");
 });

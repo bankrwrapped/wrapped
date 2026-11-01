@@ -84,12 +84,25 @@ function SignedIn({ xUsername }: { xUsername: string }) {
     };
   }, [xUsername]);
 
-  const volumeSettled = profile ? profile.tradingVolume.status === "ok" && profile.tradingVolume.isComplete : true;
+  // Poll while volume is pending or still a floor. "none" never resolves (no
+  // launches to count), so it isn't polled.
+  const tv = profile?.tradingVolume;
+  const volumeSettled = !tv || tv.status === "none" || tv.status === "unavailable" || (tv.status === "ok" && tv.isComplete);
   useEffect(() => {
     if (volumeSettled) return;
     let polls = 0;
     const t = setInterval(() => {
-      if (++polls > VOLUME_POLL_MAX) return clearInterval(t);
+      if (++polls > VOLUME_POLL_MAX) {
+        clearInterval(t);
+        // A computation that failed on the API stays "pending" forever: stop
+        // saying it's being counted. An "at least" floor stays as it is.
+        setProfile((p) =>
+          p && p.tradingVolume.status === "pending"
+            ? { ...p, tradingVolume: { ...p.tradingVolume, status: "unavailable" } }
+            : p
+        );
+        return;
+      }
       // A failed poll just waits for the next one; the cards already shown stay.
       lookupWrapped(xUsername).then(setProfile, () => {});
     }, VOLUME_POLL_MS);

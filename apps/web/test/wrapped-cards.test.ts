@@ -112,6 +112,9 @@ test("top placings rank by share of the board, skipping boards without the handl
     neighbors: { above: null, below: null },
   });
   const out = topPlacings([board("a", 5, 10), board("b", 2, 40), board("c", null, 5), board("d", 1, 3)] as any, 2);
-  expect(out.map((b) => b.id)).toEqual(["b", "d"]);
+  // #1 of 3 (nobody ahead) beats #2 of 40.
+  expect(out.map((b) => b.id)).toEqual(["d", "b"]);
+  // Sole qualifier on a board still leads it; 6th of 10 is not top half.
+  expect(topPlacings([board("solo", 1, 1), board("mid", 6, 10)] as any).map((b) => b.id)).toEqual(["solo"]);
   expect(topPlacings(null)).toEqual([]);
 });

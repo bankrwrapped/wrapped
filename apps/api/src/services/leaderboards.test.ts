@@ -86,19 +86,47 @@ test("hit rate needs 5 launches and counts tokens at 0.1 ETH or more", () => {
   expect(board.entries.map((e) => [e.username, e.score])).toEqual([["five", 0.4]]);
 });
 
-test("breakout is top ÷ average, needs 3 launches and a 0.1 ETH top token", () => {
+test("breakout is top ÷ average of the others (0.01 ETH floor), needs 3 launches and a 0.1 ETH top token", () => {
   const board = rankBoard(
     "breakout",
     [
       row("small", { tokenFees: [0.05, 0.01, 0.01] }),
-      row("big", { tokenFees: [0.9, 0.05, 0.05] }),
+      row("big", { tokenFees: [0.05, 0.9, 0.05] }),
       row("even", { tokenFees: [1, 1, 1] }),
     ],
     { limit: 10 }
   );
   expect(board.entries.map((e) => e.username)).toEqual(["big", "even"]);
-  expect(board.entries[0].score).toBeCloseTo(2.7, 9);
+  expect(board.entries[0].score).toBeCloseTo(18, 9);
   expect(board.entries[1].score).toBeCloseTo(1, 9);
+});
+
+test("breakout rewards one standout token, not launch count", () => {
+  const many = [0.1, ...Array(99).fill(0)];
+  const board = rankBoard(
+    "breakout",
+    [row("spray", { tokenFees: many }), row("hit", { tokenFees: [10, 0.1, 0.1] })],
+    { limit: 10 }
+  );
+  expect(board.entries.map((e) => [e.username, e.score])).toEqual([
+    ["hit", 100],
+    ["spray", 10],
+  ]);
+});
+
+test("near-equal float sums tie and keep first-indexed order", () => {
+  const board = rankBoard(
+    "earnings",
+    [
+      row("late", { totalEth: 0.1 + 0.2, firstIndexedAt: "2026-10-02T00:00:00.000Z" }),
+      row("early", { totalEth: 0.3, firstIndexedAt: "2026-10-01T00:00:00.000Z" }),
+    ],
+    { limit: 10 }
+  );
+  expect(board.entries.map((e) => [e.username, e.rank, e.tied])).toEqual([
+    ["early", 1, true],
+    ["late", 1, true],
+  ]);
 });
 
 test("personal row and neighbors, matched case-insensitively", () => {

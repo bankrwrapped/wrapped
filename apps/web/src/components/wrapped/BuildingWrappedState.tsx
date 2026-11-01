@@ -82,14 +82,6 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-5 text-center">
-      <video
-        className="pointer-events-none absolute inset-0 size-full object-cover opacity-25"
-        src="/bankr-ambient.mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-      />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/85 via-background/70 to-background/90" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
 

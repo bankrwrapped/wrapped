@@ -29,7 +29,9 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
   const reduce = useReducedMotion();
   const cards = CARDS.filter((c) => c.available(ctx));
   const cols = useColumns();
-  const [open, setOpen] = useState<number | null>(null);
+  // The open card is tracked by id: the list is rebuilt from the live profile,
+  // so a background update (volume landing) can shift positions under it.
+  const [openId, setOpenId] = useState<string | null>(null);
   const faceRef = useRef<HTMLDivElement | null>(null);
   const v = p.tradingVolume;
 
@@ -38,12 +40,15 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
     { label: "ETH earned", value: p.totalEth, format: (n: number) => n.toFixed(3), prefix: p.earningsPartial ? "≥ " : "" },
     v.status === "ok" && v.totalVolumeUsd > 0
       ? { label: v.isComplete ? "Trading volume" : "Volume so far", value: v.totalVolumeUsd, format: formatUsd }
-      : { label: "Trading volume", text: "Counting…" },
+      : { label: "Trading volume", text: v.status === "pending" ? "Counting…" : v.status === "ok" ? "$0" : "—" },
     p.bestDay ? { label: "Best day, ETH", value: p.bestDay.eth, format: (n: number) => n.toFixed(3) } : { label: "Please Bro tokens", value: p.pleaseBro.length, format: (n: number) => String(Math.round(n)) },
   ];
 
-  const def = open !== null ? cards[open] : null;
-  const step = (d: number) => setOpen((o) => (o === null ? o : (o + d + cards.length) % cards.length));
+  const openAt = openId === null ? -1 : cards.findIndex((c) => c.id === openId);
+  const def = openAt >= 0 ? cards[openAt] : null;
+  const step = (d: number) => {
+    if (openAt >= 0) setOpenId(cards[(openAt + d + cards.length) % cards.length].id);
+  };
 
   return (
     <main className="relative min-h-screen overflow-hidden pb-24 text-white">
@@ -121,7 +126,7 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
               >
                 <button
                   type="button"
-                  onClick={() => setOpen(i)}
+                  onClick={() => setOpenId(c.id)}
                   className="block w-full rounded-[22px] text-left shadow-[0_30px_60px_-30px_rgba(0,0,0,0.8)] outline-none ring-accent ring-offset-2 ring-offset-[#0b0910] focus-visible:ring-2"
                   aria-label={`Open the ${c.eyebrow} card`}
                 >
@@ -149,7 +154,7 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
         </section>
       </div>
 
-      <Dialog.Root open={def !== null} onOpenChange={(o) => !o && setOpen(null)}>
+      <Dialog.Root open={def !== null} onOpenChange={(o) => !o && setOpenId(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md" />
           <Dialog.Content
@@ -158,7 +163,7 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
               if (e.key === "ArrowRight") step(1);
               if (e.key === "ArrowLeft") step(-1);
             }}
-            onClick={(e) => e.target === e.currentTarget && setOpen(null)}
+            onClick={(e) => e.target === e.currentTarget && setOpenId(null)}
           >
             {def && (
               <>
@@ -188,7 +193,7 @@ export function Finale({ ctx, onReplay, notices }: { ctx: CardContext; onReplay:
                   <X className="size-4" />
                 </Dialog.Close>
                 <p className="font-mono text-[11px] text-white/50">
-                  {open! + 1} / {cards.length}
+                  {openAt + 1} / {cards.length}
                 </p>
               </>
             )}
