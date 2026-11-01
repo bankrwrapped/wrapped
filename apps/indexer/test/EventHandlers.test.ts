@@ -6,18 +6,29 @@ import { test, expect, mock, beforeEach } from "bun:test";
 
 type Handler = (args: { event: any; context: any }) => Promise<void>;
 const handlers = new Map<string, Handler>();
+// The LP locker list comes from config.yaml via indexer.chains, as at runtime.
+const CONFIG_LP_LOCKERS = ["0x29d17C1A8D851d7d4cA97FAe97AcAdb398D9cCE0", "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496"];
 mock.module("envio", () => ({
-  indexer: { onEvent: (sel: { contract: string; event: string }, fn: Handler) => handlers.set(`${sel.contract}.${sel.event}`, fn) },
+  indexer: {
+    onEvent: (sel: { contract: string; event: string }, fn: Handler) => handlers.set(`${sel.contract}.${sel.event}`, fn),
+    chains: { 8453: { ClankerLpLocker: { addresses: CONFIG_LP_LOCKERS } } },
+  },
 }));
 
 let store: Record<string, Map<string, any>>;
 const entity = (name: string) => ({
   get: async (id: string) => store[name].get(id),
   set: (row: any) => { store[name].set(row.id, row); },
+  deleteUnsafe: (id: string) => { store[name].delete(id); },
 });
+const reads: string[] = [];
+const counted = (name: string) => {
+  const e = entity(name);
+  return { ...e, get: async (id: string) => (reads.push(`${name}:${id}`), e.get(id)) };
+};
 const context = () => ({
   chain: { id: 8453 },
-  KnownAsset: entity("KnownAsset"), KnownToken: entity("KnownToken"), WatchedPool: entity("WatchedPool"),
+  KnownAsset: counted("KnownAsset"), KnownToken: entity("KnownToken"), WatchedPool: entity("WatchedPool"),
   IndexedSwap: entity("IndexedSwap"), IndexedFeeEvent: entity("IndexedFeeEvent"),
   PendingFeeAttribution: entity("PendingFeeAttribution"), ClankerV31Launch: entity("ClankerV31Launch"),
 });
@@ -27,12 +38,12 @@ await import("../src/EventHandlers");
 const LOCKER = "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496"; // FeeConversion locker (checksummed on purpose)
 const WETH = "0x4200000000000000000000000000000000000006";
 let logIndex = 0;
-async function emit(key: string, params: Record<string, unknown>, txHash = "0xtx1") {
+async function emit(key: string, params: Record<string, unknown>, txHash = "0xtx1", block = 100) {
   const fn = handlers.get(key);
   if (!fn) throw new Error("no handler " + key);
   logIndex += 1;
   await fn({
-    event: { params, logIndex, block: { number: 100, timestamp: 1_760_000_000 }, transaction: { hash: txHash } },
+    event: { params, logIndex, block: { number: block, timestamp: 1_760_000_000 }, transaction: { hash: txHash } },
     context: ctx,
   });
 }
@@ -44,6 +55,7 @@ beforeEach(() => {
   );
   ctx = context();
   logIndex = 0;
+  reads.length = 0;
 });
 
 const store_ = (feeOwner: string, token: string, amount: bigint, sender = LOCKER) =>
@@ -136,4 +148,74 @@ test("v3.1 collect: the creator's share of both tokens, attributed to the launch
     eventType: "ClankerV31ClaimedRewards", recipient: "0xcreatorpayee", launchedToken: "0xv31token",
     tokenAddress: "0xv31token", tokenAddress1: WETH, amountToken0: 40n, amountToken1: 4n,
   });
+});
+
+test("an attributed tx leaves no PendingFeeAttribution row behind", async () => {
+  await emit("ClankerFeeLocker.StoreTokens", store_("0xc", WETH, 1n));
+  expect(store.PendingFeeAttribution.size).toBe(1);
+  await emit("ClankerLpLocker.ClaimedRewards", { token: "0xLaunch", amount0: 0n, amount1: 0n, rewards0: [], rewards1: [] });
+  expect(store.PendingFeeAttribution.size).toBe(0);
+  // A second collect in the same tx starts a fresh queue and is still attributed.
+  await emit("ClankerFeeLocker.StoreTokens", store_("0xc", WETH, 2n));
+  await emit("ClankerLpLocker.ClaimedRewards", { token: "0xLaunch2", amount0: 0n, amount1: 0n, rewards0: [], rewards1: [] });
+  expect([...store.IndexedFeeEvent.values()].map((r) => r.launchedToken)).toEqual(["0xlaunch", "0xlaunch2"]);
+  expect(store.PendingFeeAttribution.size).toBe(0);
+});
+
+test("StoreTokens is accepted from both config.yaml LP lockers, in any address case", async () => {
+  await emit("ClankerFeeLocker.StoreTokens", store_("0xa", WETH, 1n, CONFIG_LP_LOCKERS[0].toLowerCase()));
+  await emit("ClankerFeeLocker.StoreTokens", store_("0xb", WETH, 1n, CONFIG_LP_LOCKERS[1]));
+  expect(store.IndexedFeeEvent.size).toBe(2);
+});
+
+const v4Created = (msgSender: string, token: string, poolId: string) => ({
+  msgSender, tokenAddress: token, tokenAdmin: "0xadmin", tokenImage: "", tokenName: "T", tokenSymbol: "T",
+  tokenMetadata: "", tokenContext: "", startingTick: 0, poolHook: "0xhook", poolId, pairedToken: WETH,
+  locker: "0xlocker", mevModule: "0xmev", extensionsSupply: 0n, extensions: [],
+});
+
+test("Clanker v4: only Bankr's deployer registers a launch and its pool", async () => {
+  await emit("Clanker.TokenCreated", v4Created(BANKR_DEPLOYER, "0xBankrV4", "0xPOOLA"));
+  await emit("Clanker.TokenCreated", v4Created("0xSomeoneElse", "0xOtherV4", "0xPOOLB"));
+  expect([...store.KnownToken.keys()]).toEqual(["base:0xbankrv4"]);
+  expect([...store.WatchedPool.keys()]).toEqual(["base:0xpoola"]);
+});
+
+test("Doppler Collect: launchedToken set, no recipient", async () => {
+  await emit("Airlock.Create", { asset: "0xDopplerToken", numeraire: WETH, initializer: "0xi", poolOrHook: "0xh" });
+  await emit("PoolManager.Initialize", {
+    id: "0xPOOL", currency0: "0x0000000000000000000000000000000000000000", currency1: "0xDopplerToken",
+    fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0,
+  });
+  await emit("StreamableFeesLockerV2.Collect", { poolId: "0xPOOL", fees0: 1n, fees1: 2n });
+  const [row] = [...store.IndexedFeeEvent.values()];
+  expect(row).toMatchObject({ eventType: "Collect", recipient: undefined, launchedToken: "0xdopplertoken", amountToken0: 1n, amountToken1: 2n });
+});
+
+const swap = (id: string) => ({ id, sender: "0xs", amount0: -5n, amount1: 7n, sqrtPriceX96: 0n, liquidity: 0n, tick: 0, fee: 0 });
+
+test("non-Bankr pools: the KnownAsset lookup is cached as notBankr after the Initialize block", async () => {
+  const init = { id: "0xFOREIGN", currency0: "0x0000000000000000000000000000000000000001", currency1: WETH, fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0 };
+  await emit("PoolManager.Initialize", init, "0xinit", 100);
+  // Same block as Initialize: a Create could still be in it, so nothing is cached.
+  await emit("PoolManager.Swap", swap("0xFOREIGN"), "0xs1", 100);
+  expect(store.WatchedPool.get("base:0xforeign").notBankr).toBeUndefined();
+  await emit("PoolManager.Swap", swap("0xFOREIGN"), "0xs2", 101);
+  expect(store.WatchedPool.get("base:0xforeign").notBankr).toBe(true);
+  const before = reads.length;
+  await emit("PoolManager.Swap", swap("0xFOREIGN"), "0xs3", 102);
+  expect(reads.length).toBe(before); // no more KnownAsset reads
+  expect(store.IndexedSwap.size).toBe(0);
+});
+
+test("Bankr Doppler pools still resolve and index swaps", async () => {
+  await emit("Airlock.Create", { asset: "0xDopplerToken", numeraire: WETH, initializer: "0xi", poolOrHook: "0xh" }, "0xc", 100);
+  await emit("PoolManager.Initialize", {
+    id: "0xPOOL", currency0: "0x0000000000000000000000000000000000000000", currency1: "0xDopplerToken",
+    fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0,
+  }, "0xc", 100);
+  await emit("PoolManager.Swap", swap("0xPOOL"), "0xs", 105);
+  const [row] = [...store.IndexedSwap.values()];
+  expect(row).toMatchObject({ tokenAddress: "0xdopplertoken", amountToken: 7n });
+  expect(store.WatchedPool.get("base:0xpool")).toMatchObject({ tokenAddress: "0xdopplertoken", tokenIsToken0: false });
 });

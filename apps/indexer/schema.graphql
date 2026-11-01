@@ -59,13 +59,15 @@ type WatchedPool {
   currency1: String! # raw PoolManager.Initialize currency1 — same
   tokenAddress: String # null until resolved for Doppler pools (see file header); always set immediately for Clanker pools, which have no lookup race
   tokenIsToken0: Boolean # null until resolved, same rule as tokenAddress
+  initBlock: BigInt # PoolManager.Initialize block; null on rows written by Clanker TokenCreated (always resolved)
+  notBankr: Boolean # true once a later-block event found neither side is a Doppler launch, so the lookup isn't repeated per swap
 }
 
 type IndexedSwap {
   id: ID! # `${chain}:${txHash}:${logIndex}`
   chain: String!
   poolId: String!
-  tokenAddress: String!
+  tokenAddress: String! @index # the API pages a token's swaps by this
   blockNumber: BigInt!
   txHash: String!
   logIndex: Int!
@@ -105,7 +107,7 @@ type IndexedFeeEvent {
   poolId: String # null for Clanker fee events, which aren't pool-keyed
   tokenAddress: String!
   eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned' | 'ClankerV31ClaimedRewards'
-  recipient: String # beneficiary (Release), feeOwner - the wallet that earned the fees - (StoreTokens/ClaimTokens/ClaimTokensPermissioned); null for Collect
+  recipient: String @index # the API pages a wallet's fee events by this. beneficiary (Release), feeOwner - the wallet that earned the fees - (StoreTokens/ClaimTokens/ClaimTokensPermissioned); null for Collect
   launchedToken: String # the launch these fees were earned on: the pool's launched token for Doppler, attributed via the LP locker's ClaimedRewards for Clanker StoreTokens; null for Clanker claims (a claim can't be tied to a launch)
   amountToken0: BigInt
   amountToken1: BigInt

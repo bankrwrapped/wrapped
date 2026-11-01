@@ -20,10 +20,25 @@
 const INCOMPATIBLE = "incompatible with the existing indexer data";
 const envio = (process.env.ENVIO_BIN ?? "bunx envio").split(" ");
 
+// Railway stops a deployment by signalling this wrapper, not envio. Pass the
+// signal on so envio shuts down cleanly (finishes its write, closes the DB)
+// instead of running on until the container is killed - possibly overlapping
+// the next deployment on the same database. After a stop signal, don't start
+// over with -r either.
+let current: ReturnType<typeof Bun.spawn> | null = null;
+let stopping = false;
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    stopping = true;
+    current?.kill(signal);
+  });
+}
+
 // Runs envio, passing its output straight through, and reports whether it
 // printed the "can't resume this storage" error.
 async function run(args: string[]): Promise<{ code: number; incompatible: boolean }> {
   const proc = Bun.spawn([...envio, ...args], { stdout: "pipe", stderr: "pipe", stdin: "inherit" });
+  current = proc;
   let incompatible = false;
   const forward = async (stream: ReadableStream<Uint8Array>, out: typeof process.stdout) => {
     const decoder = new TextDecoder();
@@ -40,7 +55,7 @@ async function run(args: string[]): Promise<{ code: number; incompatible: boolea
 }
 
 const first = await run(["start"]);
-if (!first.incompatible) process.exit(first.code);
+if (!first.incompatible || stopping) process.exit(first.code);
 
 if (process.env.ENVIO_AUTO_RESET === "false") {
   console.error("[start] stored indexer data can't be resumed and ENVIO_AUTO_RESET=false - not starting over");

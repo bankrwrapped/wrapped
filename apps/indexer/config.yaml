@@ -29,10 +29,12 @@
 # through Doppler/V4 multicurve exclusively (Module 2/3's territory).
 # `Clanker` and `ClankerFeeLocker` addresses below are the real, verified
 # Base v4.0.0 deployment (cross-checked against Clanker's own docs page AND
-# BaseScan's live verified-contract ABI, not assumed). `ClankerLpLockerFeeConversion`
-# is deliberately NOT watched here — it auto-collects LP fees per swap and
-# calls storeFees() on ClankerFeeLocker, which is what emits StoreTokens;
-# watching the LP locker directly would just duplicate that signal.
+# BaseScan's live verified-contract ABI, not assumed). Both LP lockers
+# (ClankerLpLocker and ClankerLpLockerFeeConversion) ARE watched, under the
+# ClankerLpLocker contract below, for ClaimedRewards only: that's what ties
+# each StoreTokens fee deposit to the launch it was earned on. Removing either
+# address leaves that locker's fees unattributed (dropped from earnings). The
+# handler also reads this address list to accept StoreTokens from them.
 #
 # NOTE on event_type naming: real Doppler event names, confirmed from
 # source (whetstoneresearch/doppler, src/lockers/StreamableFeesLockerV2.sol

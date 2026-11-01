@@ -37,7 +37,7 @@
  * chain, not just Bankr's — there's no way to filter at Initialize time
  * anymore.
  *
- * Five contracts, all watched statically/globally from genesis:
+ * Eight contracts, watched statically from their start blocks (config.yaml):
  *  - Airlock.Create                            -> KnownAsset rows
  *  - PoolManager.Initialize                    -> WatchedPool rows, unconditional (see above)
  *  - PoolManager.Swap                          -> IndexedSwap rows, feeds Trading Volume Engine (Module 7)
@@ -45,6 +45,11 @@
  *  - Clanker.TokenCreated                      -> KnownToken + WatchedPool rows (Module 4) — no lookup race, tokenAddress known immediately
  *  - ClankerFeeLocker.{StoreTokens,ClaimTokens,ClaimTokensPermissioned} -> IndexedFeeEvent rows (Module 4)
  *  - ClankerLpLocker.ClaimedRewards            -> attributes that tx's StoreTokens rows to their launched token
+ *  - ClankerV31.TokenCreated                   -> ClankerV31Launch rows (Bankr's deployer only)
+ *  - ClankerV31LpLocker.ClaimedRewards         -> IndexedFeeEvent rows, creator share of Bankr v3.1 launches
+ *
+ * Clanker TokenCreated (v4 and v3.1) only registers launches by Bankr's
+ * deployer (BANKR_CLANKER_DEPLOYERS); other Clanker launches aren't Bankr's.
  */
 
 import { indexer } from "envio";
@@ -81,6 +86,8 @@ type WatchedPoolEntity = {
   currency1: string;
   tokenAddress?: string | null;
   tokenIsToken0?: boolean | null;
+  initBlock?: bigint | null;
+  notBankr?: boolean | null;
 };
 
 // Lazily resolves and caches which side of a WatchedPool (if any) is a
@@ -89,19 +96,34 @@ type WatchedPoolEntity = {
 // if this pool isn't a known Bankr/Doppler launch. Clanker pools always
 // have tokenAddress already set at write time, so they short-circuit on
 // the first check and never hit the KnownAsset lookup here.
+//
+// A negative answer is cached too (notBankr), since most PoolManager pools
+// aren't Bankr's and their swaps would otherwise repeat the lookup forever.
+// It's only cached once the event is in a later block than the pool's
+// Initialize: Airlock.Create lands in the same tx as Initialize, so after
+// that block the answer can't change. (Same-block events just re-check.)
 async function resolveWatchedPoolToken(
   chain: string,
   pool: WatchedPoolEntity,
-  context: any
+  context: any,
+  blockNumber: bigint
 ): Promise<{ tokenAddress: string; tokenIsToken0: boolean } | null> {
   if (pool.tokenAddress !== undefined && pool.tokenAddress !== null) {
     return { tokenAddress: pool.tokenAddress, tokenIsToken0: pool.tokenIsToken0 === true };
   }
+  if (pool.notBankr === true) return null;
 
-  const asset0 = await context.KnownAsset.get(`${chain}:${pool.currency0}`);
-  const asset1 = await context.KnownAsset.get(`${chain}:${pool.currency1}`);
+  const [asset0, asset1] = await Promise.all([
+    context.KnownAsset.get(`${chain}:${pool.currency0}`),
+    context.KnownAsset.get(`${chain}:${pool.currency1}`),
+  ]);
   const known = asset0 ?? asset1;
-  if (!known) return null; // not a Bankr/Doppler launch — leave uncached, cheap to re-check if this changes
+  if (!known) {
+    if (pool.initBlock !== undefined && pool.initBlock !== null && blockNumber > pool.initBlock) {
+      context.WatchedPool.set({ ...pool, notBankr: true });
+    }
+    return null;
+  }
 
   const tokenIsToken0 = asset0 !== undefined && asset0 !== null;
 
@@ -148,6 +170,8 @@ indexer.onEvent({ contract: "PoolManager", event: "Initialize" }, async ({ event
     currency1,
     tokenAddress: undefined,
     tokenIsToken0: undefined,
+    initBlock: BigInt(event.block.number),
+    notBankr: undefined,
   });
 });
 
@@ -166,7 +190,7 @@ indexer.onEvent({ contract: "PoolManager", event: "Swap" }, async ({ event, cont
     return;
   }
 
-  const resolved = await resolveWatchedPoolToken(chain, pool, context);
+  const resolved = await resolveWatchedPoolToken(chain, pool, context, BigInt(event.block.number));
   if (!resolved) {
     // Not one of Bankr's known pools — discard.
     return;
@@ -194,13 +218,20 @@ indexer.onEvent({ contract: "PoolManager", event: "Swap" }, async ({ event, cont
 
 // ---- Doppler fee events --------------------------------------------------------
 
-indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async ({ event, context }) => {
+// Collect (fees pulled into the locker, no recipient) and Release (fees paid
+// to a beneficiary) produce the same row shape.
+async function setDopplerFee(
+  context: any,
+  event: any,
+  eventType: "Collect" | "Release",
+  recipient: string | undefined
+): Promise<void> {
   const chain = chainName(context.chain.id);
   const poolId = normalizeAddress(event.params.poolId);
   const pool = await context.WatchedPool.get(`${chain}:${poolId}`);
   if (!pool) return;
 
-  const resolved = await resolveWatchedPoolToken(chain, pool, context);
+  const resolved = await resolveWatchedPoolToken(chain, pool, context, BigInt(event.block.number));
   if (!resolved) return;
 
   context.IndexedFeeEvent.set({
@@ -208,8 +239,8 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async 
     chain,
     poolId,
     tokenAddress: resolved.tokenAddress,
-    eventType: "Collect",
-    recipient: undefined,
+    eventType,
+    recipient,
     launchedToken: resolved.tokenAddress,
     amountToken0: event.params.fees0,
     tokenAddress1: undefined,
@@ -219,38 +250,28 @@ indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async 
     logIndex: event.logIndex,
     timestamp: new Date(event.block.timestamp * 1000),
   });
+}
+
+indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async ({ event, context }) => {
+  await setDopplerFee(context, event, "Collect", undefined);
 });
 
 indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Release" }, async ({ event, context }) => {
-  const chain = chainName(context.chain.id);
-  const poolId = normalizeAddress(event.params.poolId);
-  const pool = await context.WatchedPool.get(`${chain}:${poolId}`);
-  if (!pool) return;
-
-  const resolved = await resolveWatchedPoolToken(chain, pool, context);
-  if (!resolved) return;
-
-  context.IndexedFeeEvent.set({
-    id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
-    chain,
-    poolId,
-    tokenAddress: resolved.tokenAddress,
-    eventType: "Release",
-    recipient: normalizeAddress(event.params.beneficiary), // lowercased like every other address here, so the API's recipient filter matches
-    launchedToken: resolved.tokenAddress,
-    amountToken0: event.params.fees0,
-    tokenAddress1: undefined,
-    amountToken1: event.params.fees1,
-    blockNumber: BigInt(event.block.number),
-    txHash: event.transaction.hash,
-    logIndex: event.logIndex,
-    timestamp: new Date(event.block.timestamp * 1000),
-  });
+  // Lowercased like every other address here, so the API's recipient filter matches.
+  await setDopplerFee(context, event, "Release", normalizeAddress(event.params.beneficiary));
 });
 
 // ---- Clanker pool discovery + fee events (Module 4) ------------------
 
+// Bankr's deployer for every Clanker launch it made (140,541 per Clanker's
+// API, v3.1 then v4). Launches with any other msgSender aren't Bankr's, even
+// when they name Bankr's interface admin. Applies to v4 and v3.1 alike.
+const BANKR_CLANKER_DEPLOYERS = new Set(["0x2112b8456ac07c15fa31ddf3bf713e77716ff3f9"]);
+
 indexer.onEvent({ contract: "Clanker", event: "TokenCreated" }, async ({ event, context }) => {
+  // Other Clanker v4 launches would otherwise get a KnownToken and a resolved
+  // WatchedPool, so every one of their swaps would be indexed as Bankr's.
+  if (!BANKR_CLANKER_DEPLOYERS.has(normalizeAddress(event.params.msgSender))) return;
   const chain = chainName(context.chain.id);
   const tokenAddress = normalizeAddress(event.params.tokenAddress);
   const poolId = normalizeAddress(event.params.poolId);
@@ -279,11 +300,24 @@ indexer.onEvent({ contract: "Clanker", event: "TokenCreated" }, async ({ event, 
 });
 
 // Only the Clanker LP lockers deposit LP fees; storeFees() has other
-// allowed depositors whose deposits aren't launch fees.
-const CLANKER_LP_LOCKERS = new Set([
-  "0x29d17c1a8d851d7d4ca97fae97acadb398d9cce0", // ClankerLpLocker
-  "0x63d2dfea64b3433f4071a98665bcd7ca14d93496", // ClankerLpLockerFeeConversion
-]);
+// allowed depositors whose deposits aren't launch fees. The lockers are the
+// ClankerLpLocker addresses in config.yaml - read from there, so a locker
+// added to the config can't be watched for ClaimedRewards while its
+// StoreTokens are silently dropped here.
+const lpLockersByChain = new Map<number, Set<string>>();
+function clankerLpLockers(chainId: number): Set<string> {
+  let lockers = lpLockersByChain.get(chainId);
+  if (!lockers) {
+    const addresses: readonly string[] = (indexer as any).chains?.[chainId]?.ClankerLpLocker?.addresses ?? [];
+    lockers = new Set(addresses.map(normalizeAddress));
+    // Fail loudly: an empty list would silently drop every Clanker fee.
+    if (lockers.size === 0) {
+      throw new Error(`No ClankerLpLocker addresses for chain ${chainId} from config.yaml - refusing to drop every StoreTokens.`);
+    }
+    lpLockersByChain.set(chainId, lockers);
+  }
+  return lockers;
+}
 
 // StoreTokens names only the FEE token (usually WETH, sometimes the launched
 // token itself), never which launch earned it - the old KnownToken(token)
@@ -292,7 +326,7 @@ const CLANKER_LP_LOCKERS = new Set([
 indexer.onEvent({ contract: "ClankerFeeLocker", event: "StoreTokens" }, async ({ event, context }) => {
   const chain = chainName(context.chain.id);
   const sender = normalizeAddress(event.params.sender);
-  if (!CLANKER_LP_LOCKERS.has(sender)) return;
+  if (!clankerLpLockers(context.chain.id).has(sender)) return;
 
   const feeOwner = normalizeAddress(event.params.feeOwner);
   const token = normalizeAddress(event.params.token);
@@ -315,6 +349,10 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "StoreTokens" }, async ({
     timestamp: new Date(event.block.timestamp * 1000),
   });
 
+  // Read-modify-write on the tx's queue is safe: Envio (3.6) runs a batch's
+  // handlers one at a time after the preload pass, and get() sees set()s made
+  // earlier in the batch (LoadLayer serves in-memory rows first). Preload-pass
+  // set()s are no-ops, so the preload pass can't lose an id either.
   const pendingId = `${chain}:${event.transaction.hash}`;
   const pending = await context.PendingFeeAttribution.get(pendingId);
   context.PendingFeeAttribution.set({
@@ -341,7 +379,10 @@ indexer.onEvent({ contract: "ClankerLpLocker", event: "ClaimedRewards" }, async 
     if (!feeEvent) continue;
     context.IndexedFeeEvent.set({ ...feeEvent, launchedToken });
   }
-  context.PendingFeeAttribution.set({ id: pendingId, eventIds: [] });
+  // Delete rather than empty the queue: nearly every Clanker swap tx collects
+  // fees, so empty rows would pile up forever. A later batch in the same tx
+  // just creates a fresh row.
+  context.PendingFeeAttribution.deleteUnsafe(pendingId);
 });
 
 // Clanker claims, kept so the API can check each wallet's Clanker numbers:
@@ -386,11 +427,6 @@ indexer.onEvent({ contract: "ClankerFeeLocker", event: "ClaimTokensPermissioned"
 });
 
 // ---- Clanker v3.1 (Bankr launches 2025-03-18 to about July 2025) ----
-
-// Bankr's deployer for every Clanker launch it made (140,541 per Clanker's
-// API, v3.1 then v4). Launches with any other msgSender aren't Bankr's, even
-// when they name Bankr's interface admin.
-const BANKR_CLANKER_DEPLOYERS = new Set(["0x2112b8456ac07c15fa31ddf3bf713e77716ff3f9"]);
 
 indexer.onEvent({ contract: "ClankerV31", event: "TokenCreated" }, async ({ event, context }) => {
   if (!BANKR_CLANKER_DEPLOYERS.has(normalizeAddress(event.params.msgSender))) return;

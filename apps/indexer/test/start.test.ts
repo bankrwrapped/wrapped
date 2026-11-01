@@ -23,7 +23,12 @@ if (mode === "incompatible") {
   process.exit(1);
 }
 if (mode === "crash") { console.error("ERROR: RPC unreachable"); process.exit(3); }
+if (mode === "hang") {
+  process.on("SIGTERM", () => { appendFileSync(${JSON.stringify(calls)}, "got SIGTERM\\n"); process.exit(143); });
+  console.log("ready"); setInterval(() => {}, 1000);
+} else {
 console.log("resuming"); process.exit(0);
+}
 `);
 
 const script = join(import.meta.dir, "../scripts/start.ts");
@@ -56,4 +61,18 @@ test("ENVIO_AUTO_RESET=false: stays down instead of starting over", () => {
   const r = start({ FAKE_MODE: "incompatible", ENVIO_AUTO_RESET: "false" });
   expect(r.exitCode).toBe(1);
   expect(recorded()).toEqual(["start"]);
+});
+
+test("a stop signal is passed on to envio, which shuts down cleanly; no start-over after it", async () => {
+  const proc = Bun.spawn(["bun", script], { env: { ...process.env, ENVIO_BIN: `bun ${fake}`, FAKE_MODE: "hang" }, stdout: "pipe", stderr: "pipe" });
+  const reader = proc.stdout.getReader();
+  let out = "";
+  while (!out.includes("ready")) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error("fake envio exited before it was ready");
+    out += new TextDecoder().decode(value);
+  }
+  proc.kill("SIGTERM");
+  expect(await proc.exited).toBe(143);
+  expect(recorded()).toEqual(["start", "got SIGTERM"]);
 });
