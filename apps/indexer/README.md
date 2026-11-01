@@ -8,12 +8,17 @@ On-chain indexer for **Base** (chain 8453), built with [Envio HyperIndex](https:
 | --- | --- | --- |
 | Doppler `Airlock` | `Create` | `KnownAsset` (launched token) |
 | Uniswap v4 `PoolManager` | `Initialize`, `Swap` | `WatchedPool` (every pool; launch side resolved lazily), `IndexedSwap` |
-| Doppler `StreamableFeesLockerV2` | `Collect`, `Release` | `IndexedFeeEvent` with `launchedToken` |
+| `DopplerFees` (wildcard, any contract) | `Collect`, `Release` | `IndexedFeeEvent` with `launchedToken` and `emitter`, only from the launch's own fee holder |
+| `DopplerFees` (wildcard) | `FeeScheduleSet`, `SetDopplerHook` | `DopplerHookOf`: which Rehype hook a launch uses |
 | Clanker v4 factory | `TokenCreated` (Bankr's deployer only) | `KnownToken`, `WatchedPool` |
 | `ClankerFeeLocker` | `StoreTokens`, `ClaimTokens`, `ClaimTokensPermissioned` | `IndexedFeeEvent` |
 | Clanker LP lockers (`ClankerLpLocker`, `ClankerLpLockerFeeConversion`) | `ClaimedRewards` | Attributes the transaction's `StoreTokens` rows to their launch |
 | Clanker v3.1 factory | `TokenCreated` (Bankr's deployer only) | `ClankerV31Launch` |
 | Clanker v3.1 `LpLockerv2` | `ClaimedRewards` | `IndexedFeeEvent` (creator share, Bankr v3.1 launches only) |
+
+Doppler creator fees are paid by whichever contract holds the pool's fees: the `StreamableFeesLockerV2` for migrated pools, the launch's initializer (`DopplerHookInitializer`, multicurve), or a Rehype hook, of which Doppler ships a new version every few weeks. Recent Bankr launches pay from the last two and never touch the locker. So fee events are read from every contract and an event counts only when its emitter is a known locker (`DOPPLER_FEE_LOCKERS` in the handler), the launch's `initializer` from `Airlock.Create`, the hook that set the pool's fee schedule inside the launch's own create transaction, or a hook the initializer attached later (`SetDopplerHook`). Anything else for a Bankr pool is counted in `RejectedFeeEmitter`; check that table after a re-index, since a large count there means a fee holder these rules miss.
+
+Known gap: legacy Rehype pools with no fee beneficiaries send fees to the buyback address without any event, so nothing can index them.
 
 Only Bankr's Clanker launches are registered: `TokenCreated` from any deployer other than Bankr's (`BANKR_CLANKER_DEPLOYERS`) is skipped, on v4 and v3.1 alike. `StoreTokens` is accepted only from the LP lockers listed under `ClankerLpLocker` in `config.yaml`; the handler reads that list, so a new locker only needs adding there.
 

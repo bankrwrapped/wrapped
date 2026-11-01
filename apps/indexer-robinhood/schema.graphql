@@ -1,45 +1,61 @@
-# Module 2 entity schema — Envio's own database.
-#
-# RESOLVED 2026-08-07 (playbook update): Envio and apps/api are two SEPARATE
-# Postgres instances. Envio owns this schema; apps/api owns only
-# indexed_contracts/indexed_tokens/token_volume_summary/price_cache in its
-# own DB (Module 6). Data flows one direction only: Envio -> apps/api via
-# Module 9's sync job.
-#
-# RESOLVED 2026-08-08 (real design change, not a bug fix): pool matching is
-# back to currency-address matching (KnownAsset), not hook-address matching
-# (the old KnownHook). Confirmed via a real on-chain Create tx: `poolOrHook`
-# is NOT reliably a genuine V4 hook address — it depends on which Doppler
-# pool-initializer variant ran for a given launch, and at least one real
-# launch returned the asset's own address in that slot instead of a hook.
-# Under the old hooks-matching design this wasn't just messy metadata: that
-# pool's `Initialize.hooks` would never match any KnownHook row, so
-# WatchedPool never got created, and every subsequent Swap/Collect/Release
-# for it was silently dropped. `hookAddress` is kept on KnownAsset as an
-# audit field only (e.g. to count how many indexed launches used a
-# non-hook initializer) — not used for matching anymore.
+# Robinhood indexer entities - the Doppler subset of apps/indexer/schema.graphql
+# (Base). Same shapes so the API queries both the same way.
 
 type KnownAsset {
   id: ID! # `${chain}:${tokenAddress}`
   chain: String!
   tokenAddress: String!
-  hookAddress: String! # poolOrHook from Airlock.Create — audit-only, see note above; NOT reliably a real hook address
-  source: String! # 'doppler' (Clanker confirmed Base-only, not on Robinhood — §2 OQ3 — so this field only ever needs to distinguish doppler here, not clanker, on this chain)
+  hookAddress: String! # poolOrHook from Airlock.Create — audit-only; NOT reliably a real hook address
+  source: String! # 'doppler' 
+  initializer: String # Airlock.Create's pool initializer - the fee holder for initializer-managed pools
+  createTxHash: String # the launch tx; a Rehype hook that set this pool's fee schedule in it is genuine
+  blockNumber: BigInt
+  timestamp: Timestamp # launch time
+}
+
+# Which Doppler hook (Rehype) a launch's fees come from. Two kinds of row:
+#  - `${chain}:pool:${poolId}`: the contract that emitted FeeScheduleSet for the
+#    pool, and in which tx (genuine only if that's the launch's create tx)
+#  - `${chain}:asset:${asset}`: a hook attached later via SetDopplerHook,
+#    emitted by `setBy` (genuine only if that's the launch's initializer)
+type DopplerHookOf {
+  id: ID!
+  chain: String!
+  hook: String!
+  setBy: String
+  txHash: String!
+  blockNumber: BigInt!
+}
+
+# Fee events for a Bankr pool from an emitter that isn't the launch's fee
+# holder - spoofs, or a Doppler fee holder isGenuineFeeEmitter doesn't cover
+# yet. Check this table after a re-index: a big count is a source to add.
+type RejectedFeeEmitter {
+  id: ID! # `${chain}:${emitter}`
+  chain: String!
+  emitter: String!
+  count: Int!
+  lastPoolId: String!
+  lastBlock: BigInt!
 }
 
 type WatchedPool {
   id: ID! # `${chain}:${poolId}`
   chain: String!
   poolId: String!
-  tokenAddress: String!
-  tokenIsToken0: Boolean! # known at creation time from Initialize's currency0/currency1 — no RPC call needed
+  currency0: String! # raw PoolManager.Initialize currency0 — always set, regardless of whether either side is a known Bankr token
+  currency1: String! # raw PoolManager.Initialize currency1 — same
+  tokenAddress: String # null until resolved for Doppler pools (see file header); always set immediately for Clanker pools, which have no lookup race
+  tokenIsToken0: Boolean # null until resolved, same rule as tokenAddress
+  initBlock: BigInt # PoolManager.Initialize block; null on rows written by Clanker TokenCreated (always resolved)
+  notBankr: Boolean # true once a later-block event found neither side is a Doppler launch, so the lookup isn't repeated per swap
 }
 
 type IndexedSwap {
   id: ID! # `${chain}:${txHash}:${logIndex}`
   chain: String!
   poolId: String!
-  tokenAddress: String!
+  tokenAddress: String! @index # the API pages a token's swaps by this
   blockNumber: BigInt!
   txHash: String!
   logIndex: Int!
@@ -51,12 +67,15 @@ type IndexedSwap {
 type IndexedFeeEvent {
   id: ID! # `${chain}:${txHash}:${logIndex}`
   chain: String!
-  poolId: String!
+  poolId: String # null for Clanker fee events, which aren't pool-keyed
   tokenAddress: String!
-  eventType: String! # 'Collect' | 'Release' | 'Lock' | 'Unlock' | 'UpdateBeneficiary'
-  recipient: String # beneficiary (Release), recipient (Unlock), newBeneficiary (UpdateBeneficiary); null for Collect/Lock
+  eventType: String! # 'Collect' | 'Release' | 'StoreTokens' | 'ClaimTokens' | 'ClaimTokensPermissioned' | 'ClankerV31ClaimedRewards'
+  recipient: String @index # the API pages a wallet's fee events by this. beneficiary (Release), feeOwner - the wallet that earned the fees - (StoreTokens/ClaimTokens/ClaimTokensPermissioned); null for Collect
+  launchedToken: String # the launch these fees were earned on: the pool's launched token for Doppler, attributed via the LP locker's ClaimedRewards for Clanker StoreTokens; null for Clanker claims (a claim can't be tied to a launch)
   amountToken0: BigInt
   amountToken1: BigInt
+  emitter: String # contract that emitted the event (Doppler fee rows); which fee holder paid it
+  tokenAddress1: String # second fee token, when one event pays two (ClankerV31ClaimedRewards: tokenAddress/amountToken0 and tokenAddress1/amountToken1)
   blockNumber: BigInt!
   txHash: String!
   logIndex: Int!

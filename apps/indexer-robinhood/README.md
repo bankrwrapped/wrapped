@@ -1,16 +1,23 @@
 # apps/indexer-robinhood
 
-On-chain indexer for **Robinhood Chain** (chain 4663), built with [Envio HyperIndex](https://envio.dev). It's fully independent of `apps/indexer` (Base), with its own config, schema and database. Don't share files between the two.
+On-chain indexer for **Robinhood Chain** (chain 4663), built with [Envio HyperIndex](https://envio.dev). It runs separately from `apps/indexer` (Base), with its own config, schema and database, but its Doppler handlers are the same code: change both together.
 
-## Status: paused
+## Data source
 
-The backfill is paused, not broken. Free-tier RPC can't sustain a full backfill on this chain (tried with four providers), so resuming needs a paid RPC tier. Progress so far is saved and resumes cleanly; it only needs a new RPC URL.
-
-While it's paused, the API skips this chain for wallets that have no Bankr launches on it, so it doesn't affect Base-only users.
+HyperSync now serves chain 4663 (`https://4663.hypersync.xyz`), so this indexer needs only `ENVIO_API_TOKEN`, like Base. The old paid-RPC blocker is gone.
 
 ## What it indexes
 
-Doppler only (`Airlock.Create`, `PoolManager.Initialize`/`Swap`, `StreamableFeesLockerV2.Collect`/`Release`). Clanker isn't deployed on Robinhood Chain. Beneficiary addresses are stored lowercased.
+Doppler only. Clanker isn't deployed on Robinhood Chain.
+
+| Source | Events | Writes |
+|---|---|---|
+| `Airlock` | `Create` | `KnownAsset` (the launch, its initializer and create tx) |
+| `PoolManager` | `Initialize`, `Swap` | `WatchedPool` (resolved lazily, because `Airlock.Create` logs after `Initialize` in the same tx), `IndexedSwap` |
+| `DopplerFees` (wildcard) | `Collect`, `Release` | `IndexedFeeEvent` with `launchedToken` and `emitter` |
+| `DopplerFees` (wildcard) | `FeeScheduleSet`, `SetDopplerHook` | `DopplerHookOf` |
+
+Fee events count only when the launch's own fee holder emitted them. That means the fee locker, the launch's initializer, or its Rehype hook. Every recent Robinhood launch uses `DopplerHookInitializer` plus Rehype hooks, never the locker. Rejected emitters for Bankr pools are counted in `RejectedFeeEmitter`. See `apps/indexer/README.md` for the full rule. Addresses are stored lowercased.
 
 ## Run
 
@@ -24,4 +31,4 @@ bun run test
 ## Notes
 
 - **Checkpointing:** Robinhood Chain is an Arbitrum Orbit chain, not OP Stack. Use the Nitro RPC's `"finalized"` block tag for checkpointing, not Base's logic.
-- **Why free RPC can't keep up:** the chain isn't HyperSync-supported, so this indexer is RPC-bound with any provider.
+- The API reads this indexer only when `ROBINHOOD_INDEXER_ENABLED=true`, and its `launchedToken` select assumes this schema. Re-index before enabling it.

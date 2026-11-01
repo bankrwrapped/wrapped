@@ -58,6 +58,9 @@ contracts:
     events:
       - event: "Create(address asset, address indexed numeraire, address initializer, address poolOrHook)"
         name: Create
+        field_selection:
+          transaction_fields:
+            - hash
 
   - name: PoolManager
     handler: src/EventHandlers.ts
@@ -70,7 +73,15 @@ contracts:
           transaction_fields:
             - hash
 
-  - name: StreamableFeesLockerV2
+  # Doppler fee events, from ANY contract (wildcard - see the handler).
+  # Every Doppler fee holder emits the same FeesManager events:
+  # StreamableFeesLockerV2 (migrated pools), the pool's initializer
+  # (DopplerHookInitializer, multicurve initializers) and Rehype hook
+  # initializers - Doppler ships a new Rehype version every few weeks, and
+  # recent Bankr launches (Robinhood since July 2026, Base too) pay creators
+  # from those, never from the locker. The handler only accepts an event
+  # whose emitter is that launch's own fee holder.
+  - name: DopplerFees
     handler: src/EventHandlers.ts
     events:
       - event: "Collect(bytes32 indexed poolId, uint256 fees0, uint256 fees1)"
@@ -80,6 +91,19 @@ contracts:
             - hash
       - event: "Release(bytes32 indexed poolId, address indexed beneficiary, uint256 fees0, uint256 fees1)"
         name: Release
+        field_selection:
+          transaction_fields:
+            - hash
+      # A Rehype hook sets the pool's fee schedule inside the launch's own
+      # Airlock.create tx - how a launch's genuine hook is identified.
+      - event: "FeeScheduleSet(bytes32 indexed poolId, uint32 startingTime, uint24 startFee, uint24 endFee, uint32 durationSeconds)"
+        name: FeeScheduleSet
+        field_selection:
+          transaction_fields:
+            - hash
+      # A hook attached later by the pool's authority, emitted by the initializer.
+      - event: "SetDopplerHook(address indexed asset, address indexed dopplerHook)"
+        name: SetDopplerHook
         field_selection:
           transaction_fields:
             - hash
@@ -160,10 +184,10 @@ chains:
         start_block: 28415516
         address:
           - "0x498581fF718922c3f8e6A244956aF099B2652b2b"
-      - name: StreamableFeesLockerV2
+      - name: DopplerFees
         start_block: 28415516
-        address:
-          - "0xce3212e6536f33cd6fbfee265224131353ca3d47"
+        # no address: wildcard (src/EventHandlers.ts). The StreamableFeesLockerV2
+        # address that used to be the only source is in DOPPLER_FEE_LOCKERS.
       - name: Clanker
         start_block: 28415516
         address:

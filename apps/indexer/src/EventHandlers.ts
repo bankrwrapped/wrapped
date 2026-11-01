@@ -41,7 +41,9 @@
  *  - Airlock.Create                            -> KnownAsset rows
  *  - PoolManager.Initialize                    -> WatchedPool rows, unconditional (see above)
  *  - PoolManager.Swap                          -> IndexedSwap rows, feeds Trading Volume Engine (Module 7)
- *  - StreamableFeesLockerV2.{Collect,Release}  -> IndexedFeeEvent rows, feeds Creator Earnings Breakdown (Module 8)
+ *  - DopplerFees.{Collect,Release} (wildcard)  -> IndexedFeeEvent rows, feeds Creator Earnings Breakdown (Module 8);
+ *                                                only from the launch's own fee holder (isGenuineFeeEmitter)
+ *  - DopplerFees.{FeeScheduleSet,SetDopplerHook} (wildcard) -> which Rehype hook a launch uses
  *  - Clanker.TokenCreated                      -> KnownToken + WatchedPool rows (Module 4) — no lookup race, tokenAddress known immediately
  *  - ClankerFeeLocker.{StoreTokens,ClaimTokens,ClaimTokensPermissioned} -> IndexedFeeEvent rows (Module 4)
  *  - ClankerLpLocker.ClaimedRewards            -> attributes that tx's StoreTokens rows to their launched token
@@ -150,6 +152,13 @@ indexer.onEvent({ contract: "Airlock", event: "Create" }, async ({ event, contex
     tokenAddress,
     hookAddress, // audit-only — see file header; not used for matching
     source: DOPPLER_SOURCE,
+    // The launch's pool initializer: also its fee holder for initializer-
+    // managed pools (DopplerHookInitializer, multicurve). Its create tx is
+    // where a Rehype hook proves it belongs to this launch.
+    initializer: normalizeAddress(event.params.initializer),
+    createTxHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+    timestamp: new Date(event.block.timestamp * 1000),
   });
 });
 
@@ -218,8 +227,42 @@ indexer.onEvent({ contract: "PoolManager", event: "Swap" }, async ({ event, cont
 
 // ---- Doppler fee events --------------------------------------------------------
 
-// Collect (fees pulled into the locker, no recipient) and Release (fees paid
-// to a beneficiary) produce the same row shape.
+// StreamableFeesLockerV2 deployments: fees of pools that migrated into the
+// locker. Not tied to one launch, so they're trusted by address. Everything
+// else must be the launch's own initializer or its Rehype hook.
+const DOPPLER_FEE_LOCKERS: Record<number, Set<string>> = {
+  8453: new Set(["0xce3212e6536f33cd6fbfee265224131353ca3d47"]),
+  4663: new Set(["0x7b6147ac3f615bdb764e7ebd5f517dac1ad163b8"]),
+};
+
+// The wildcard listener sees these events from any contract on the chain,
+// and anyone can deploy a contract that emits Release(<a Bankr poolId>, me,
+// huge) - so an event only counts when its emitter is that launch's fee
+// holder: a known locker, the launch's initializer, or the Rehype hook that
+// set the pool's fee schedule inside the launch's own create tx (only the
+// initializer and its hook run in that tx), or a hook the initializer
+// attached later (SetDopplerHook, emitted by the initializer itself).
+async function isGenuineFeeEmitter(
+  context: any,
+  chain: string,
+  emitter: string,
+  poolId: string,
+  asset: { initializer?: string | null; createTxHash?: string | null; tokenAddress: string } | undefined
+): Promise<boolean> {
+  if (DOPPLER_FEE_LOCKERS[context.chain.id]?.has(emitter)) return true;
+  if (!asset?.initializer) return false;
+  if (emitter === asset.initializer) return true;
+  const [scheduled, attached] = await Promise.all([
+    context.DopplerHookOf.get(`${chain}:pool:${poolId}`),
+    context.DopplerHookOf.get(`${chain}:asset:${asset.tokenAddress}`),
+  ]);
+  if (scheduled && scheduled.hook === emitter && scheduled.txHash === asset.createTxHash) return true;
+  if (attached && attached.hook === emitter && attached.setBy === asset.initializer) return true;
+  return false;
+}
+
+// Collect (fees pulled into the fee holder, no recipient) and Release (fees
+// paid to a beneficiary) produce the same row shape.
 async function setDopplerFee(
   context: any,
   event: any,
@@ -234,6 +277,25 @@ async function setDopplerFee(
   const resolved = await resolveWatchedPoolToken(chain, pool, context, BigInt(event.block.number));
   if (!resolved) return;
 
+  const emitter = normalizeAddress(event.srcAddress);
+  const asset = await context.KnownAsset.get(`${chain}:${resolved.tokenAddress}`);
+  if (!(await isGenuineFeeEmitter(context, chain, emitter, poolId, asset))) {
+    // A Bankr pool's fee event from a contract we don't recognise: either a
+    // spoof or a Doppler fee holder this rule doesn't cover yet. Counted per
+    // emitter so the second case shows up after a re-index.
+    const id = `${chain}:${emitter}`;
+    const seen = await context.RejectedFeeEmitter.get(id);
+    context.RejectedFeeEmitter.set({
+      id,
+      chain,
+      emitter,
+      count: (seen?.count ?? 0) + 1,
+      lastPoolId: poolId,
+      lastBlock: BigInt(event.block.number),
+    });
+    return;
+  }
+
   context.IndexedFeeEvent.set({
     id: `${chain}:${event.transaction.hash}:${event.logIndex}`,
     chain,
@@ -245,6 +307,7 @@ async function setDopplerFee(
     amountToken0: event.params.fees0,
     tokenAddress1: undefined,
     amountToken1: event.params.fees1,
+    emitter,
     blockNumber: BigInt(event.block.number),
     txHash: event.transaction.hash,
     logIndex: event.logIndex,
@@ -252,13 +315,46 @@ async function setDopplerFee(
   });
 }
 
-indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Collect" }, async ({ event, context }) => {
+indexer.onEvent({ contract: "DopplerFees", event: "Collect", wildcard: true }, async ({ event, context }) => {
   await setDopplerFee(context, event, "Collect", undefined);
 });
 
-indexer.onEvent({ contract: "StreamableFeesLockerV2", event: "Release" }, async ({ event, context }) => {
+indexer.onEvent({ contract: "DopplerFees", event: "Release", wildcard: true }, async ({ event, context }) => {
   // Lowercased like every other address here, so the API's recipient filter matches.
   await setDopplerFee(context, event, "Release", normalizeAddress(event.params.beneficiary));
+});
+
+// Recorded for every emitter; isGenuineFeeEmitter only trusts it when the tx
+// is the launch's create tx. Only the first schedule per pool is kept.
+indexer.onEvent({ contract: "DopplerFees", event: "FeeScheduleSet", wildcard: true }, async ({ event, context }) => {
+  const chain = chainName(context.chain.id);
+  const id = `${chain}:pool:${normalizeAddress(event.params.poolId)}`;
+  if (await context.DopplerHookOf.get(id)) return;
+  context.DopplerHookOf.set({
+    id,
+    chain,
+    hook: normalizeAddress(event.srcAddress),
+    setBy: undefined,
+    txHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+  });
+});
+
+// Trusted only when setBy is the asset's initializer (checked at fee time).
+indexer.onEvent({ contract: "DopplerFees", event: "SetDopplerHook", wildcard: true }, async ({ event, context }) => {
+  const chain = chainName(context.chain.id);
+  const setBy = normalizeAddress(event.srcAddress);
+  const asset = normalizeAddress(event.params.asset);
+  const known = await context.KnownAsset.get(`${chain}:${asset}`);
+  if (!known || known.initializer !== setBy) return; // not a Bankr launch's own initializer
+  context.DopplerHookOf.set({
+    id: `${chain}:asset:${asset}`,
+    chain,
+    hook: normalizeAddress(event.params.dopplerHook),
+    setBy,
+    txHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+  });
 });
 
 // ---- Clanker pool discovery + fee events (Module 4) ------------------

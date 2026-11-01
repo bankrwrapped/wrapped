@@ -1,17 +1,15 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 #
-# Module 3 — Robinhood Chain Indexer (Doppler), isolated on purpose.
-# SPLIT OUT 2026-08-08 after config.yaml got overwritten by Module 2/4's
-# Base+Clanker merge (their own header note confirms Robinhood was
-# "intentionally omitted" from that shared file). Postgres data itself
-# (schema `public`) was untouched — only this config file was lost —
-# reconstructed here from Module 3's confirmed real values.
+# Robinhood Chain (4663) indexer: Bankr's Doppler launches. Separate from
+# apps/indexer (Base) on purpose - its own database and deploy. Same
+# Doppler handlers as Base minus Clanker (not deployed on Robinhood).
+# config.robinhood.yaml is a copy kept for `envio dev --config` habits;
+# config.yaml is what `envio dev`/`envio start` read.
 #
-# Run this file explicitly: `bunx envio dev --config config.robinhood.yaml`
-# Do NOT let other modules merge into this file. Do NOT merge this back
-# into the shared config.yaml — that's what caused the collision.
+# HyperSync serves chain 4663 (https://4663.hypersync.xyz), so this runs
+# with ENVIO_API_TOKEN like Base; no RPC needed.
 
-name: bankr-wrapped-base-indexer
+name: bankr-wrapped-robinhood-indexer
 
 contracts:
   - name: Airlock
@@ -19,6 +17,9 @@ contracts:
     events:
       - event: "Create(address asset, address indexed numeraire, address initializer, address poolOrHook)"
         name: Create
+        field_selection:
+          transaction_fields:
+            - hash
 
   - name: PoolManager
     handler: src/EventHandlers.ts
@@ -31,7 +32,15 @@ contracts:
           transaction_fields:
             - hash
 
-  - name: StreamableFeesLockerV2
+  # Doppler fee events, from ANY contract (wildcard - see the handler).
+  # Every Doppler fee holder emits the same FeesManager events:
+  # StreamableFeesLockerV2 (migrated pools), the pool's initializer
+  # (DopplerHookInitializer, multicurve initializers) and Rehype hook
+  # initializers - Doppler ships a new Rehype version every few weeks, and
+  # recent Bankr launches (Robinhood since July 2026, Base too) pay creators
+  # from those, never from the locker. The handler only accepts an event
+  # whose emitter is that launch's own fee holder.
+  - name: DopplerFees
     handler: src/EventHandlers.ts
     events:
       - event: "Collect(bytes32 indexed poolId, uint256 fees0, uint256 fees1)"
@@ -41,6 +50,19 @@ contracts:
             - hash
       - event: "Release(bytes32 indexed poolId, address indexed beneficiary, uint256 fees0, uint256 fees1)"
         name: Release
+        field_selection:
+          transaction_fields:
+            - hash
+      # A Rehype hook sets the pool's fee schedule inside the launch's own
+      # Airlock.create tx - how a launch's genuine hook is identified.
+      - event: "FeeScheduleSet(bytes32 indexed poolId, uint32 startingTime, uint24 startFee, uint24 endFee, uint32 durationSeconds)"
+        name: FeeScheduleSet
+        field_selection:
+          transaction_fields:
+            - hash
+      # A hook attached later by the pool's authority, emitted by the initializer.
+      - event: "SetDopplerHook(address indexed asset, address indexed dopplerHook)"
+        name: SetDopplerHook
         field_selection:
           transaction_fields:
             - hash
@@ -55,6 +77,6 @@ chains:
       - name: PoolManager
         address:
           - "0x8366a39CC670B4001A1121B8F6A443A643e40951"
-      - name: StreamableFeesLockerV2
-        address:
-          - "0x7b6147ac3f615bdb764e7ebd5f517dac1ad163b8"
+      # Wildcard: no address. The fee locker (0x7b6147ac...) is trusted in
+      # src/EventHandlers.ts (DOPPLER_FEE_LOCKERS).
+      - name: DopplerFees

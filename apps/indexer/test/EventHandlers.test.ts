@@ -31,6 +31,7 @@ const context = () => ({
   KnownAsset: counted("KnownAsset"), KnownToken: entity("KnownToken"), WatchedPool: entity("WatchedPool"),
   IndexedSwap: entity("IndexedSwap"), IndexedFeeEvent: entity("IndexedFeeEvent"),
   PendingFeeAttribution: entity("PendingFeeAttribution"), ClankerV31Launch: entity("ClankerV31Launch"),
+  DopplerHookOf: entity("DopplerHookOf"), RejectedFeeEmitter: entity("RejectedFeeEmitter"),
 });
 
 await import("../src/EventHandlers");
@@ -38,12 +39,14 @@ await import("../src/EventHandlers");
 const LOCKER = "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496"; // FeeConversion locker (checksummed on purpose)
 const WETH = "0x4200000000000000000000000000000000000006";
 let logIndex = 0;
-async function emit(key: string, params: Record<string, unknown>, txHash = "0xtx1", block = 100) {
+// Default emitter for DopplerFees events: the Base fee locker (trusted by address).
+const FEE_LOCKER = "0xCE3212E6536F33cd6FBFEE265224131353CA3D47";
+async function emit(key: string, params: Record<string, unknown>, txHash = "0xtx1", block = 100, srcAddress = FEE_LOCKER) {
   const fn = handlers.get(key);
   if (!fn) throw new Error("no handler " + key);
   logIndex += 1;
   await fn({
-    event: { params, logIndex, block: { number: block, timestamp: 1_760_000_000 }, transaction: { hash: txHash } },
+    event: { params, srcAddress, logIndex, block: { number: block, timestamp: 1_760_000_000 }, transaction: { hash: txHash } },
     context: ctx,
   });
 }
@@ -51,7 +54,7 @@ let ctx: ReturnType<typeof context>;
 
 beforeEach(() => {
   store = Object.fromEntries(
-    ["KnownAsset", "KnownToken", "WatchedPool", "IndexedSwap", "IndexedFeeEvent", "PendingFeeAttribution", "ClankerV31Launch"].map((n) => [n, new Map()]),
+    ["KnownAsset", "KnownToken", "WatchedPool", "IndexedSwap", "IndexedFeeEvent", "PendingFeeAttribution", "ClankerV31Launch", "DopplerHookOf", "RejectedFeeEmitter"].map((n) => [n, new Map()]),
   );
   ctx = context();
   logIndex = 0;
@@ -109,7 +112,7 @@ test("Doppler Release: beneficiary lowercased, launchedToken set, both fee amoun
     id: "0xPOOL", currency0: "0x0000000000000000000000000000000000000000", currency1: "0xDopplerToken",
     fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0,
   });
-  await emit("StreamableFeesLockerV2.Release", { poolId: "0xPOOL", beneficiary: "0xBeNeFiCiArY", fees0: 11n, fees1: 22n });
+  await emit("DopplerFees.Release", { poolId: "0xPOOL", beneficiary: "0xBeNeFiCiArY", fees0: 11n, fees1: 22n });
   const [row] = [...store.IndexedFeeEvent.values()];
   expect(row.eventType).toBe("Release");
   expect(row.recipient).toBe("0xbeneficiary");
@@ -187,7 +190,7 @@ test("Doppler Collect: launchedToken set, no recipient", async () => {
     id: "0xPOOL", currency0: "0x0000000000000000000000000000000000000000", currency1: "0xDopplerToken",
     fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0,
   });
-  await emit("StreamableFeesLockerV2.Collect", { poolId: "0xPOOL", fees0: 1n, fees1: 2n });
+  await emit("DopplerFees.Collect", { poolId: "0xPOOL", fees0: 1n, fees1: 2n });
   const [row] = [...store.IndexedFeeEvent.values()];
   expect(row).toMatchObject({ eventType: "Collect", recipient: undefined, launchedToken: "0xdopplertoken", amountToken0: 1n, amountToken1: 2n });
 });
@@ -218,4 +221,67 @@ test("Bankr Doppler pools still resolve and index swaps", async () => {
   const [row] = [...store.IndexedSwap.values()];
   expect(row).toMatchObject({ tokenAddress: "0xdopplertoken", amountToken: 7n });
   expect(store.WatchedPool.get("base:0xpool")).toMatchObject({ tokenAddress: "0xdopplertoken", tokenIsToken0: false });
+});
+
+// ---- Which contracts' fee events count ----
+
+const POOL_INIT = {
+  id: "0xPOOL", currency0: "0x0000000000000000000000000000000000000000", currency1: "0xDopplerToken",
+  fee: 0, tickSpacing: 0, hooks: "0xh", sqrtPriceX96: 0n, tick: 0,
+};
+async function launch() {
+  await emit("Airlock.Create", { asset: "0xDopplerToken", numeraire: WETH, initializer: "0xInit", poolOrHook: "0xh" }, "0xcreate", 100);
+  await emit("PoolManager.Initialize", POOL_INIT, "0xcreate", 100);
+}
+const release = (src: string, tx = "0xr") =>
+  emit("DopplerFees.Release", { poolId: "0xPOOL", beneficiary: "0xb", fees0: 1n, fees1: 0n }, tx, 200, src);
+
+test("fees from the launch's own initializer count, with the emitter recorded", async () => {
+  await launch();
+  await release("0xINIT");
+  const [row] = [...store.IndexedFeeEvent.values()];
+  expect(row).toMatchObject({ emitter: "0xinit", launchedToken: "0xdopplertoken" });
+  expect(store.KnownAsset.get("base:0xdopplertoken")).toMatchObject({ initializer: "0xinit", createTxHash: "0xcreate" });
+});
+
+test("a Release for a Bankr pool from an unrelated contract is rejected and counted", async () => {
+  await launch();
+  await release("0xSpoofer");
+  await release("0xSpoofer", "0xr2");
+  expect(store.IndexedFeeEvent.size).toBe(0);
+  expect(store.RejectedFeeEmitter.get("base:0xspoofer")).toMatchObject({ count: 2, lastPoolId: "0xpool" });
+});
+
+test("fee events for pools that aren't Bankr launches are ignored without a rejection row", async () => {
+  await release("0xAnything");
+  expect(store.IndexedFeeEvent.size + store.RejectedFeeEmitter.size).toBe(0);
+});
+
+test("a Rehype hook counts only when it set the fee schedule in the launch's create tx", async () => {
+  await launch();
+  const sched = { poolId: "0xPOOL", startingTime: 0, startFee: 0, endFee: 0, durationSeconds: 0 };
+  await emit("DopplerFees.FeeScheduleSet", sched, "0xcreate", 100, "0xRehype");
+  // A later schedule from someone else doesn't replace the first.
+  await emit("DopplerFees.FeeScheduleSet", sched, "0xlater", 150, "0xSpoofer");
+  await release("0xREHYPE");
+  await release("0xSpoofer", "0xr2");
+  const rows = [...store.IndexedFeeEvent.values()];
+  expect(rows.map((r) => r.emitter)).toEqual(["0xrehype"]);
+});
+
+test("a schedule set outside the create tx doesn't make its emitter trusted", async () => {
+  await launch();
+  await emit("DopplerFees.FeeScheduleSet", { poolId: "0xPOOL", startingTime: 0, startFee: 0, endFee: 0, durationSeconds: 0 }, "0xother", 150, "0xFake");
+  await release("0xFake");
+  expect(store.IndexedFeeEvent.size).toBe(0);
+});
+
+test("a hook attached later counts only when the launch's initializer attached it", async () => {
+  await launch();
+  await emit("DopplerFees.SetDopplerHook", { asset: "0xDopplerToken", dopplerHook: "0xFakeHook" }, "0xs1", 150, "0xNotInit");
+  await release("0xFAKEHOOK");
+  expect(store.IndexedFeeEvent.size).toBe(0);
+  await emit("DopplerFees.SetDopplerHook", { asset: "0xDopplerToken", dopplerHook: "0xNewHook" }, "0xs2", 160, "0xInit");
+  await release("0xNEWHOOK", "0xr2");
+  expect([...store.IndexedFeeEvent.values()].map((r) => r.emitter)).toEqual(["0xnewhook"]);
 });
