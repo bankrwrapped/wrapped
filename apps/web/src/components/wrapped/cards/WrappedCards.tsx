@@ -1,436 +1,419 @@
-// The Wrapped card set. Each card is built from the profile alone (the ranks
-// card also reads /api/leaderboards) and returns null when it has nothing
-// true to say, so a missing number drops a card instead of showing a zero.
-import { useEffect, useState } from "react";
+// The share cards. Each card is a definition: whether the profile has
+// something true to show for it, the X post text, and the face (a CardFrame).
+// A missing number drops the card instead of showing a zero. The finale's
+// card wall and the lightbox both render from CARDS.
+import type { ReactNode } from "react";
 import { getArchetype } from "@/lib/archetype";
 import { getBuilderType } from "@/lib/builder-type";
-import { claimRhythm, WEEKDAYS } from "@/lib/claim-rhythm";
+import { claimRhythm, weekdayPlural, WEEKDAYS } from "@/lib/claim-rhythm";
+import { dailySeries, daysSince, formatDate, formatUsd } from "@/lib/story-data";
 import { summarizeThemes } from "@/lib/token-themes";
-import { tokenHue, tokenInitials } from "@/lib/token-badge";
-import {
-  BOARDS,
-  CHAIN_LABEL,
-  fetchLeaderboards,
-  formatBoardScore,
-  formatEth,
-  proxiedImageUrl,
-  type BoardResult,
-  type TokenEntry,
-  type WrappedProfile,
-} from "@/lib/wrapped-data";
-import { ShareableCard } from "./ShareableCard";
+import { topPlacings } from "@/hooks/use-ranks";
+import { BOARDS, CHAIN_LABEL, formatBoardScore, formatEth, proxiedImageUrl, type BoardResult, type WrappedProfile } from "@/lib/wrapped-data";
+import { TokenBadge } from "@/components/wrapped/story/motion";
+import { CardFrame, type Tone } from "./ShareableCard";
 
-type CardProps = { profile: WrappedProfile };
+export type CardContext = { profile: WrappedProfile; boards: BoardResult[] | null };
 
-const big = "font-display text-5xl font-extrabold leading-none sm:text-6xl";
-const sub = "mt-3 text-sm text-muted-foreground";
+export type CardDef = {
+  id: string;
+  eyebrow: string;
+  tone: Tone;
+  available: (c: CardContext) => boolean;
+  shareText: (c: CardContext) => string;
+  Body: (c: CardContext) => ReactNode;
+};
 
+const hero = "font-display font-extrabold leading-[0.92] tracking-tight";
+const label = "font-mono text-[10px] uppercase tracking-[0.2em] text-white/55";
+
+const topTokens = (p: WrappedProfile) => [...p.launched].sort((a, b) => b.feesEarnedEth - a.feesEarnedEth);
 const atLeast = (p: WrappedProfile) => (p.earningsPartial ? "at least " : "");
 
-export function formatUsd(n: number): string {
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${Math.round(n)}`;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso.length === 10 ? iso + "T00:00:00Z" : iso).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-function TokenBadge({ token, size = "size-10" }: { token: TokenEntry; size?: string }) {
-  return (
-    <span
-      className={`${size} flex shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ring-1 ring-border`}
-      style={{ backgroundColor: `hsl(${tokenHue(token.tokenAddress)}, 60%, 38%)` }}
-      aria-hidden
-    >
-      {tokenInitials(token.symbol)}
-    </span>
-  );
-}
-
-export function BuilderTypeCard({ profile: p }: CardProps) {
-  const type = getBuilderType(p.tokensLaunched);
-  if (!type) return null;
-  return (
-    <ShareableCard
-      id="builder-type"
-      eyebrow="Your builder type"
-      handle={p.handle}
-      shareText={`I'm ${type.title} on Bankr: ${p.tokensLaunched} tokens launched. What's yours?`}
-    >
-      {p.avatar && (
-        <img
-          src={proxiedImageUrl(p.avatar)}
-          alt=""
-          crossOrigin="anonymous"
-          className="mb-5 size-16 rounded-full border-2 border-white/20 object-cover"
-        />
-      )}
-      <h2 className="font-display text-4xl font-extrabold uppercase leading-tight sm:text-5xl">{type.title}</h2>
-      <p className={sub}>{type.description}</p>
-      <p className="mt-6 font-mono text-sm">
-        <span className="text-accent">{p.tokensLaunched}</span> {p.tokensLaunched === 1 ? "token" : "tokens"} launched
-      </p>
-    </ShareableCard>
-  );
-}
-
-// Launcher "job title" - the archetype, read off earnings and claim habits.
-export function JobTitleCard({ profile: p }: CardProps) {
-  if (p.creatorFeesStatus === "unavailable") return null;
-  const a = getArchetype(p);
-  return (
-    <ShareableCard
-      id="job-title"
-      eyebrow="Your launcher job title"
-      handle={p.handle}
-      shareText={`Bankr gave me a job title: ${a.title}.`}
-    >
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Title</p>
-      <h2 className="mt-2 font-display text-4xl font-extrabold leading-tight sm:text-5xl">
-        <span className="text-gradient">{a.title}</span>
-      </h2>
-      <p className="mt-5 border-l-2 border-accent/60 pl-4 text-base italic text-muted-foreground">“{a.description}”</p>
-      <p className="mt-4 font-mono text-[11px] text-muted-foreground">Signed, Bankr</p>
-    </ShareableCard>
-  );
-}
-
-export function FirstLaunchCard({ profile: p }: CardProps) {
-  const f = p.firstLaunch;
-  if (!f) return null;
-  return (
-    <ShareableCard
-      id="first-launch"
-      eyebrow="Where it started"
-      handle={p.handle}
-      shareText={`My Bankr story started with $${f.symbol} on ${formatDate(f.launchedAt)}.`}
-    >
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Your first launch</p>
-      <h2 className="mt-3 font-display text-4xl font-extrabold leading-tight">{f.name}</h2>
-      <p className={sub}>
-        ${f.symbol} on {CHAIN_LABEL[f.chain]} · {formatDate(f.launchedAt)}
-      </p>
-      <p className="mt-6 text-sm">That's where your Bankr story began.</p>
-    </ShareableCard>
-  );
-}
-
-export function EarningsCard({ profile: p }: CardProps) {
-  if (p.creatorFeesStatus === "unavailable" || p.totalEth <= 0) return null;
-  return (
-    <ShareableCard
-      id="earnings"
-      eyebrow="What you earned"
-      handle={p.handle}
-      shareText={`I've earned ${atLeast(p)}${formatEth(p.totalEth)} in launch fees on Bankr.`}
-    >
-      {p.earningsPartial && <p className="mb-2 font-mono text-xs text-muted-foreground">at least</p>}
-      <p className={big}>
-        <span className="text-gradient">{formatEth(p.totalEth)}</span>
-      </p>
-      <p className={sub}>claimed + unclaimed, from launch fees</p>
-      <dl className="mt-8 grid grid-cols-2 gap-4 font-mono text-sm">
-        <div>
-          <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Your launches</dt>
-          <dd className="mt-1">{formatEth(p.creatorEarningsEth)}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Please Bro</dt>
-          <dd className="mt-1">{formatEth(p.pleaseBroEarningsEth)}</dd>
-        </div>
-        {p.unclaimedEth > 0 && (
-          <div className="col-span-2">
-            <dt className="text-[11px] uppercase tracking-widest text-muted-foreground">Still unclaimed</dt>
-            <dd className="mt-1 text-accent">{formatEth(p.unclaimedEth)}</dd>
+export const CARDS: CardDef[] = [
+  {
+    id: "builder-type",
+    eyebrow: "Builder type",
+    tone: "violet",
+    available: ({ profile: p }) => getBuilderType(p.tokensLaunched) !== null,
+    shareText: ({ profile: p }) =>
+      `I'm ${getBuilderType(p.tokensLaunched)!.title} on Bankr: ${p.tokensLaunched} tokens launched. What's yours?`,
+    Body: ({ profile: p }) => {
+      const type = getBuilderType(p.tokensLaunched)!;
+      return (
+        <>
+          <span aria-hidden className={`${hero} pointer-events-none absolute -right-3 -top-8 text-[190px] text-white/[0.06]`}>
+            {p.tokensLaunched}
+          </span>
+          {p.avatar && (
+            <img src={proxiedImageUrl(p.avatar)} alt="" crossOrigin="anonymous" className="mb-auto mt-3 size-14 rounded-full object-cover ring-2 ring-white/25" />
+          )}
+          <h2 className={`${hero} text-[40px] uppercase`}>{type.title}</h2>
+          <p className="mt-3 text-[13px] leading-snug text-white/70">{type.description}</p>
+          <p className="mt-4 font-mono text-xs">
+            <span className="text-accent">{p.tokensLaunched}</span> {p.tokensLaunched === 1 ? "token" : "tokens"} launched
+          </p>
+        </>
+      );
+    },
+  },
+  {
+    id: "earnings",
+    eyebrow: "What you earned",
+    tone: "ember",
+    available: ({ profile: p }) => p.creatorFeesStatus !== "unavailable" && p.totalEth > 0,
+    shareText: ({ profile: p }) => `I've earned ${atLeast(p)}${formatEth(p.totalEth)} in launch fees on Bankr.`,
+    Body: ({ profile: p }) => {
+      const series = dailySeries(p.dailyEarnings);
+      let run = 0;
+      const cumulative = series.map((d) => (run += d.eth));
+      const max = run || 1;
+      const pts = cumulative.map((v, i) => `${((i / Math.max(1, cumulative.length - 1)) * 304).toFixed(1)},${(70 - (v / max) * 64).toFixed(1)}`);
+      return (
+        <>
+          {cumulative.length > 1 && (
+            <div className="mb-auto mt-4">
+              <p className="mb-1 text-right font-mono text-[9px] text-white/50">claimed, last {series.length} days</p>
+              <svg viewBox="0 0 304 72" className="h-[72px] w-full" aria-hidden>
+                <defs>
+                  <linearGradient id="earn-fill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0" stopColor="white" stopOpacity="0.35" />
+                    <stop offset="1" stopColor="white" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <polygon points={`0,72 ${pts.join(" ")} 304,72`} fill="url(#earn-fill)" />
+                <polyline points={pts.join(" ")} fill="none" stroke="white" strokeWidth="1.6" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
+          {p.earningsPartial && <p className={label}>at least</p>}
+          <p className={`${hero} text-gradient text-[58px]`}>{formatEth(p.totalEth).replace(" ETH", "")}</p>
+          <p className="mt-1 font-display text-xl font-bold">ETH earned</p>
+          <div className="mt-5 grid grid-cols-3 gap-3 font-mono text-[11px]">
+            <div>
+              <p className={label}>Launches</p>
+              <p className="mt-1">{formatEth(p.creatorEarningsEth)}</p>
+            </div>
+            <div>
+              <p className={label}>Please Bro</p>
+              <p className="mt-1">{formatEth(p.pleaseBroEarningsEth)}</p>
+            </div>
+            <div>
+              <p className={label}>Unclaimed</p>
+              <p className="mt-1 text-accent">{formatEth(p.unclaimedEth)}</p>
+            </div>
           </div>
-        )}
-      </dl>
-    </ShareableCard>
-  );
-}
-
-export function BestDayCard({ profile: p }: CardProps) {
-  if (!p.bestDay || p.bestDay.eth <= 0) return null;
-  return (
-    <ShareableCard
-      id="best-day"
-      eyebrow="Your highlight"
-      handle={p.handle}
-      shareText={`Best day on Bankr: ${formatEth(p.bestDay.eth)} claimed on ${formatDate(p.bestDay.date)}.`}
-    >
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Best claim day</p>
-      <p className={`${big} mt-3`}>{formatEth(p.bestDay.eth)}</p>
-      <p className={sub}>{formatDate(p.bestDay.date)}</p>
-      <p className="mt-6 text-sm">One day. One claim. Remember it.</p>
-    </ShareableCard>
-  );
-}
-
-export function StreakCard({ profile: p }: CardProps) {
-  if (p.longestStreakDays <= 1) return null;
-  return (
-    <ShareableCard
-      id="streak"
-      eyebrow="Your rhythm"
-      handle={p.handle}
-      shareText={`${p.longestStreakDays} days in a row claiming fees on Bankr.`}
-    >
-      <p className={big}>
-        {p.longestStreakDays} <span className="text-2xl">days</span>
-      </p>
-      <p className={sub}>longest claim streak, last 90 days</p>
-      <div className="mt-8 flex flex-wrap gap-1.5" aria-hidden>
-        {Array.from({ length: Math.min(p.longestStreakDays, 30) }, (_, i) => (
-          <span key={i} className="size-3 rounded-sm bg-accent" style={{ opacity: 0.4 + (0.6 * (i + 1)) / Math.min(p.longestStreakDays, 30) }} />
-        ))}
-      </div>
-    </ShareableCard>
-  );
-}
-
-// When you claim: a 90-day calendar of claim days, plus the busiest weekday.
-export function ClaimRhythmCard({ profile: p }: CardProps) {
-  const r = claimRhythm(p.dailyEarnings);
-  if (r.claimDays < 3) return null;
-  const max = Math.max(...r.weeks.flat().map((c) => c?.eth ?? 0));
-  const maxWeekday = Math.max(...r.byWeekday);
-  return (
-    <ShareableCard
-      id="claim-rhythm"
-      eyebrow="When you claim"
-      handle={p.handle}
-      shareText={`${r.claimDays} claim days in 90 on Bankr. ${r.busiestWeekday}s are my payday.`}
-    >
-      <p className="font-display text-3xl font-extrabold leading-tight">
-        {r.busiestWeekday}s are <span className="text-gradient">payday</span>
-      </p>
-      <p className={sub}>{r.claimDays} claim days in the last 90</p>
-      <div className="mt-6 flex gap-[3px]" aria-hidden>
-        {r.weeks.map((week, w) => (
-          <div key={w} className="flex flex-col gap-[3px]">
-            {week.map((c, d) => (
-              <span
-                key={d}
-                className="size-[11px] rounded-[2px] sm:size-3"
-                style={{
-                  backgroundColor: !c ? "transparent" : c.eth > 0 ? "var(--accent)" : "var(--glass-border)",
-                  opacity: c && c.eth > 0 ? 0.35 + 0.65 * (c.eth / (max || 1)) : 1,
-                }}
-              />
+        </>
+      );
+    },
+  },
+  {
+    id: "best-day",
+    eyebrow: "Your highlight",
+    tone: "magenta",
+    available: ({ profile: p }) => !!p.bestDay && p.bestDay.eth > 0,
+    shareText: ({ profile: p }) => `Best day on Bankr: ${formatEth(p.bestDay!.eth)} claimed on ${formatDate(p.bestDay!.date)}.`,
+    Body: ({ profile: p }) => {
+      const series = dailySeries(p.dailyEarnings);
+      const max = Math.max(...series.map((d) => d.eth), 0.0001);
+      const w = 304 / Math.max(series.length, 1);
+      return (
+        <>
+          {series.length > 1 && (
+            <svg viewBox="0 0 304 110" className="mb-auto mt-4 h-[110px] w-full" aria-hidden>
+              {series.map((d, i) => {
+                const peak = d.date === p.bestDay!.date || d.eth === max;
+                // Square-root heights so one huge day doesn't flatten the rest.
+                const h = Math.max(d.eth > 0 ? 3 : 1, Math.sqrt(d.eth / max) * 104);
+                return <rect key={d.date} x={peak ? i * w - 1.5 : i * w} y={110 - h} width={peak ? Math.max(4, w + 2) : Math.max(1, w - 1)} height={h} rx={1} fill={peak ? "var(--accent)" : "rgba(255,255,255,0.32)"} />;
+              })}
+            </svg>
+          )}
+          <p className={label}>Best claim day</p>
+          <p className={`${hero} mt-2 text-[58px]`}>{formatEth(p.bestDay!.eth).replace(" ETH", "")}</p>
+          <p className="mt-1 font-display text-xl font-bold">ETH in one day</p>
+          <p className="mt-3 font-mono text-xs text-white/70">{formatDate(p.bestDay!.date)}</p>
+        </>
+      );
+    },
+  },
+  {
+    id: "top-token",
+    eyebrow: "What resonated",
+    tone: "gold",
+    available: ({ profile: p }) => (topTokens(p)[0]?.feesEarnedEth ?? 0) > 0,
+    shareText: ({ profile: p }) => {
+      const t = topTokens(p)[0];
+      return `My top earner on Bankr: $${t.symbol}, ${formatEth(t.feesEarnedEth)} in fees.`;
+    },
+    Body: ({ profile: p }) => {
+      const [top, ...rest] = topTokens(p);
+      return (
+        <>
+          <div className="mb-auto mt-4 flex justify-center">
+            <div className="relative">
+              <div className="absolute -inset-8 rounded-full bg-[radial-gradient(circle,rgba(255,200,120,0.35),transparent_70%)]" />
+              <TokenBadge token={top} size={112} />
+            </div>
+          </div>
+          <p className={label}>Top earner · #1 of {p.launched.length}</p>
+          <h2 className={`${hero} mt-2 text-[38px]`}>{top.name}</h2>
+          <p className="mt-1 font-mono text-xs text-white/70">
+            ${top.symbol} · {CHAIN_LABEL[top.chain]}
+          </p>
+          <div className="mt-4 flex items-end justify-between">
+            <p className="font-display text-[28px] font-extrabold text-accent">{formatEth(top.feesEarnedEth)}</p>
+            {rest.length > 0 && (
+              <div className="flex -space-x-2 pb-1">
+                {rest.slice(0, 3).map((t) => (
+                  <TokenBadge key={t.tokenAddress} token={t} size={26} />
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="mt-1 font-mono text-[9px] text-white/45">recent fees: claimed in 90 days + unclaimed</p>
+        </>
+      );
+    },
+  },
+  {
+    id: "starter-pack",
+    eyebrow: "Starter pack",
+    tone: "indigo",
+    available: ({ profile: p }) => p.launched.length >= 4,
+    shareText: ({ profile: p }) => `My Bankr starter pack: ${topTokens(p).slice(0, 4).map((t) => "$" + t.symbol).join(", ")}.`,
+    Body: ({ profile: p }) => (
+      <>
+        <h2 className={`${hero} mb-auto mt-3 text-[30px]`}>
+          The @{p.handle}
+          <br />
+          <span className="text-gradient">starter pack</span>
+        </h2>
+        <div className="grid grid-cols-2 gap-2.5">
+          {topTokens(p)
+            .slice(0, 4)
+            .map((t, i) => (
+              <div
+                key={t.tokenAddress}
+                className="flex flex-col rounded-2xl border border-white/12 bg-white/[0.06] p-3"
+                style={{ transform: `rotate(${[-2, 1.5, 1, -1.5][i]}deg)` }}
+              >
+                <TokenBadge token={t} size={34} />
+                <p className="mt-2 truncate font-display text-sm font-bold">{t.name}</p>
+                <p className="font-mono text-[10px] text-white/60">${t.symbol}</p>
+                <p className="mt-1 font-mono text-[10px] text-accent">{formatEth(t.feesEarnedEth)}</p>
+              </div>
+            ))}
+        </div>
+      </>
+    ),
+  },
+  {
+    id: "themes",
+    eyebrow: "Top themes",
+    tone: "violet",
+    available: ({ profile: p }) => p.launched.length >= 3 && summarizeThemes(p.launched).length >= 2,
+    shareText: ({ profile: p }) => `A bit of everything on Bankr, but mostly ${summarizeThemes(p.launched)[0].label}.`,
+    Body: ({ profile: p }) => {
+      const themes = summarizeThemes(p.launched);
+      const most = Math.max(...themes.map((t) => t.count));
+      return (
+        <>
+          <p className="mb-auto mt-3 text-[15px] text-white/70">A bit of everything, but mostly</p>
+          <h2 className={`${hero} text-gradient text-[44px]`}>{themes[0].label}</h2>
+          <ul className="mt-5 space-y-2.5">
+            {themes.slice(0, 4).map((t) => (
+              <li key={t.id}>
+                <div className="flex justify-between text-xs">
+                  <span>{t.label}</span>
+                  <span className="font-mono text-white/60">
+                    {t.count} · {formatEth(t.feesEth)}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${(t.count / most) * 100}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      );
+    },
+  },
+  {
+    id: "rhythm",
+    eyebrow: "When you claim",
+    tone: "ember",
+    available: ({ profile: p }) => claimRhythm(p.dailyEarnings).claimDays >= 3,
+    shareText: ({ profile: p }) => {
+      const r = claimRhythm(p.dailyEarnings);
+      return `${r.claimDays} claim days in 90 on Bankr${p.longestStreakDays > 1 ? `, ${p.longestStreakDays} in a row at best` : ""}. ${weekdayPlural(r.busiestWeekday!)} are payday.`;
+    },
+    Body: ({ profile: p }) => {
+      const r = claimRhythm(p.dailyEarnings);
+      const max = Math.max(...r.weeks.flat().map((c) => c?.eth ?? 0), 0.0001);
+      // Cells shrink to fit however many weeks the series spans.
+      const cell = Math.min(17, Math.floor((304 - (r.weeks.length - 1) * 3) / Math.max(r.weeks.length, 1)));
+      return (
+        <>
+          <h2 className={`${hero} mt-3 text-[38px]`}>
+            {weekdayPlural(r.busiestWeekday!)} are <span className="text-gradient">payday</span>
+          </h2>
+          <div className="my-auto flex justify-center gap-[3px] py-4" aria-hidden>
+            {r.weeks.map((week, w) => (
+              <div key={w} className="flex flex-col gap-[3px]">
+                {week.map((c, d) => (
+                  <span
+                    key={d}
+                    className="rounded-[3px]"
+                    style={{
+                      width: cell,
+                      height: cell,
+                      backgroundColor: !c ? "transparent" : c.eth > 0 ? "var(--accent)" : "rgba(255,255,255,0.08)",
+                      opacity: c && c.eth > 0 ? 0.4 + 0.6 * (c.eth / max) : 1,
+                    }}
+                  />
+                ))}
+              </div>
             ))}
           </div>
-        ))}
-      </div>
-      <div className="mt-5 grid grid-cols-7 gap-1 font-mono text-[10px] text-muted-foreground">
-        {WEEKDAYS.map((d, i) => (
-          <div key={d} className="flex flex-col items-center gap-1">
-            <span className="flex h-10 w-full items-end justify-center">
-              <span
-                className="w-2/5 rounded-[2px] bg-primary"
-                style={{ height: `${Math.max(6, (r.byWeekday[i] / (maxWeekday || 1)) * 100)}%`, opacity: r.byWeekday[i] ? 1 : 0.25 }}
-              />
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className={label}>Claim days</p>
+              <p className="mt-1 font-display text-2xl font-extrabold">{r.claimDays}</p>
+            </div>
+            <div>
+              <p className={label}>Best streak</p>
+              <p className="mt-1 font-display text-2xl font-extrabold">
+                {p.longestStreakDays}
+                <span className="text-sm text-white/60"> days</span>
+              </p>
+            </div>
+            <div>
+              <p className={label}>Top day</p>
+              <p className="mt-1 font-display text-2xl font-extrabold">{r.busiestWeekday ?? "–"}</p>
+            </div>
+          </div>
+          <p className="sr-only">{WEEKDAYS.map((d, i) => `${d}: ${r.byWeekday[i]} claim days`).join(", ")}</p>
+        </>
+      );
+    },
+  },
+  {
+    id: "volume",
+    eyebrow: "Your impact",
+    tone: "gold",
+    available: ({ profile: p }) => p.tokensLaunched > 0 && p.tradingVolume.status === "ok" && p.tradingVolume.totalVolumeUsd > 0,
+    shareText: ({ profile: p }) =>
+      `My Bankr launches have done ${p.tradingVolume.isComplete ? "" : "at least "}${formatUsd(p.tradingVolume.totalVolumeUsd)} in trading volume.`,
+    Body: ({ profile: p }) => (
+      <>
+        <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 size-[260px]">
+          {[260, 200, 140, 80].map((s) => (
+            <div key={s} className="absolute rounded-full border border-white/15" style={{ width: s, height: s, left: (260 - s) / 2, top: (260 - s) / 2 }} />
+          ))}
+        </div>
+        <p className="mb-auto mt-3 max-w-[11rem] text-[15px] text-white/70">Trading volume across your {p.tokensLaunched} launches</p>
+        {!p.tradingVolume.isComplete && <p className={label}>at least · still counting</p>}
+        <p className={`${hero} text-gradient text-[76px]`}>{formatUsd(p.tradingVolume.totalVolumeUsd)}</p>
+        <p className="mt-2 font-display text-xl font-bold">traded</p>
+      </>
+    ),
+  },
+  {
+    id: "first-launch",
+    eyebrow: "Where it started",
+    tone: "indigo",
+    available: ({ profile: p }) => !!p.firstLaunch,
+    shareText: ({ profile: p }) => `My Bankr story started with $${p.firstLaunch!.symbol} on ${formatDate(p.firstLaunch!.launchedAt)}.`,
+    Body: ({ profile: p }) => {
+      const f = p.firstLaunch!;
+      const days = daysSince(f.launchedAt);
+      return (
+        <>
+          <p className="mb-auto mt-3 text-[15px] text-white/70">It all started on</p>
+          <h2 className={`${hero} text-[40px]`}>{formatDate(f.launchedAt)}</h2>
+          <div className="mt-6 flex items-center gap-2" aria-hidden>
+            <TokenBadge token={f} size={30} />
+            <div className="h-px flex-1 bg-gradient-to-r from-white/70 to-accent" />
+            <span className="size-2.5 rounded-full bg-accent shadow-[0_0_12px_var(--accent)]" />
+          </div>
+          <div className="mt-2 flex justify-between font-mono text-[10px] text-white/60">
+            <span>
+              {f.name} · ${f.symbol}
             </span>
-            {d}
+            <span>today</span>
           </div>
-        ))}
-      </div>
-    </ShareableCard>
-  );
-}
-
-// Starter pack: your four best-earning launches.
-export function StarterPackCard({ profile: p }: CardProps) {
-  const pack = [...p.launched].sort((a, b) => b.feesEarnedEth - a.feesEarnedEth).slice(0, 4);
-  if (pack.length < 2) return null;
-  return (
-    <ShareableCard
-      id="starter-pack"
-      eyebrow="Your Bankr starter pack"
-      handle={p.handle}
-      shareText={`My Bankr starter pack: ${pack.map((t) => "$" + t.symbol).join(", ")}.`}
-    >
-      <div className="grid grid-cols-2 gap-3">
-        {pack.map((t) => (
-          <div key={t.tokenAddress} className="flex flex-col items-center rounded-2xl border border-glass-border bg-white/5 p-4 text-center">
-            <TokenBadge token={t} size="size-12" />
-            <p className="mt-3 w-full truncate font-display text-base font-bold">{t.name}</p>
-            <p className="text-xs text-muted-foreground">${t.symbol}</p>
-            <p className="mt-2 font-mono text-xs text-accent">{formatEth(t.feesEarnedEth)}</p>
-          </div>
-        ))}
-      </div>
-      <p className="mt-4 text-center font-mono text-[10px] text-muted-foreground">recent fees: claimed in 90 days + unclaimed</p>
-    </ShareableCard>
-  );
-}
-
-export function TopTokenCard({ profile: p }: CardProps) {
-  const top = [...p.launched, ...p.pleaseBro].sort((a, b) => b.feesEarnedEth - a.feesEarnedEth)[0];
-  if (!top || top.feesEarnedEth <= 0) return null;
-  const isPleaseBro = p.pleaseBro.includes(top);
-  return (
-    <ShareableCard
-      id="top-token"
-      eyebrow="What resonated"
-      handle={p.handle}
-      shareText={`My top earner on Bankr: $${top.symbol}, ${formatEth(top.feesEarnedEth)} in fees.`}
-    >
-      <TokenBadge token={top} size="size-16" />
-      <h2 className="mt-5 font-display text-4xl font-extrabold leading-tight">{top.name}</h2>
-      <p className={sub}>
-        ${top.symbol} · {CHAIN_LABEL[top.chain]} {isPleaseBro && "· Please Bro"}
-      </p>
-      <p className="mt-6 font-display text-3xl font-extrabold text-accent">{formatEth(top.feesEarnedEth)}</p>
-      <p className="font-mono text-[11px] text-muted-foreground">recent fees: claimed in 90 days + unclaimed</p>
-    </ShareableCard>
-  );
-}
-
-// Your themes: launches grouped by name keywords, and which theme paid.
-export function ThemesCard({ profile: p }: CardProps) {
-  const themes = summarizeThemes(p.launched);
-  if (p.launched.length < 3 || themes.length < 2) return null;
-  const top = themes[0];
-  const totalCount = themes.reduce((a, t) => a + t.count, 0);
-  return (
-    <ShareableCard
-      id="themes"
-      eyebrow="Your top themes"
-      handle={p.handle}
-      shareText={`A bit of everything on Bankr, but mostly ${top.label.toLowerCase()}.`}
-    >
-      <p className="font-display text-3xl font-extrabold leading-tight">
-        A bit of everything, but mostly <span className="text-gradient">{top.label.toLowerCase()}</span>
-      </p>
-      <ul className="mt-6 space-y-3">
-        {themes.slice(0, 4).map((t) => (
-          <li key={t.id}>
-            <div className="flex justify-between text-sm">
-              <span>{t.label}</span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {t.count} · {formatEth(t.feesEth)}
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-accent" style={{ width: `${(t.count / totalCount) * 100}%` }} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </ShareableCard>
-  );
-}
-
-const VOLUME_QUIPS = [
-  "Counting every swap…",
-  "Pricing your BNKR pairs…",
-  "Asking Clanker nicely…",
-  "Replaying the chart…",
-  "Finding the buyers…",
-  "Adding up the degens…",
-  "Checking the pools…",
+          <p className="mt-5 font-display text-xl font-bold">
+            <span className="text-accent">{days.toLocaleString("en-US")}</span> days building on {CHAIN_LABEL[f.chain]}
+          </p>
+        </>
+      );
+    },
+  },
+  {
+    id: "verdict",
+    eyebrow: "Bankr's verdict",
+    tone: "magenta",
+    available: ({ profile: p }) => p.creatorFeesStatus !== "unavailable",
+    shareText: ({ profile: p }) => `Bankr's verdict on me: ${getArchetype(p).title}.`,
+    Body: ({ profile: p }) => {
+      const a = getArchetype(p);
+      return (
+        <>
+          <span aria-hidden className="pointer-events-none absolute -left-1 -top-6 font-display text-[200px] leading-none text-white/[0.08]">
+            “
+          </span>
+          <h2 className={`${hero} text-gradient mt-auto text-[46px]`}>{a.title}</h2>
+          <p className="mt-4 text-[15px] italic leading-snug text-white/80">“{a.description}”</p>
+          <p className="mt-4 font-mono text-[11px] text-white/55">Signed, Bankr</p>
+        </>
+      );
+    },
+  },
+  {
+    id: "rankings",
+    eyebrow: "Where you stand",
+    tone: "violet",
+    available: ({ boards }) => topPlacings(boards).length > 0,
+    shareText: ({ boards }) => {
+      const best = topPlacings(boards)[0];
+      return `#${best.personal!.rank} of ${best.total} on the Bankr Wrapped "${BOARDS.find((d) => d.id === best.id)!.title}" board.`;
+    },
+    Body: ({ boards }) => (
+      <>
+        <ul className="mt-4 space-y-3">
+          {topPlacings(boards).map((b) => {
+            const def = BOARDS.find((d) => d.id === b.id)!;
+            const ahead = b.neighbors.above;
+            return (
+              <li key={b.id} className="flex items-center justify-between gap-3 border-b border-white/10 pb-3 last:border-0">
+                <div className="min-w-0">
+                  <p className="font-display text-base font-bold">{def.title}</p>
+                  <p className="truncate font-mono text-[10px] text-white/55">
+                    {ahead ? `next: @${ahead.username} · ${formatBoardScore(ahead.score, def.unit)}` : "nobody ahead"}
+                  </p>
+                </div>
+                <p className="shrink-0 font-display text-[30px] font-extrabold leading-none">
+                  #{b.personal!.rank}
+                  <span className="text-xs text-white/50">/{b.total}</span>
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-auto pt-3 font-mono text-[9px] text-white/45">among everyone who has checked their Wrapped</p>
+      </>
+    ),
+  },
 ];
 
-function useQuip(lines: string[], ms = 2200) {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setI((n) => (n + 1) % lines.length), ms);
-    return () => clearInterval(t);
-  }, [lines, ms]);
-  return lines[i];
-}
-
-export function VolumeCard({ profile: p }: CardProps) {
-  const v = p.tradingVolume;
-  const quip = useQuip(VOLUME_QUIPS);
-  if (p.tokensLaunched === 0) return null;
-  if (v.status === "pending") {
-    return (
-      <section className="glass mx-auto w-full max-w-md rounded-3xl p-6 text-center">
-        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Launch volume</p>
-        <p className="mt-4 font-display text-xl font-bold">Still counting your volume</p>
-        <p className="mt-2 font-mono text-sm text-accent" aria-live="polite">
-          {quip}
-        </p>
-        <p className="mt-3 text-xs text-muted-foreground">This card fills in on its own when it's ready.</p>
-      </section>
-    );
-  }
+// A card's face, ready for the wall or the lightbox.
+export function CardFace({ def, ctx, faceRef }: { def: CardDef; ctx: CardContext; faceRef?: React.RefObject<HTMLDivElement | null> }) {
+  const Body = def.Body;
   return (
-    <ShareableCard
-      id="volume"
-      eyebrow="Your impact"
-      handle={p.handle}
-      shareText={`My Bankr launches have done ${v.isComplete ? "" : "at least "}${formatUsd(v.totalVolumeUsd)} in trading volume.`}
-    >
-      {!v.isComplete && <p className="mb-2 font-mono text-xs text-muted-foreground">at least</p>}
-      <p className={big}>
-        <span className="text-gradient">{formatUsd(v.totalVolumeUsd)}</span>
-      </p>
-      <p className={sub}>traded across your launches</p>
-      {!v.isComplete && <p className="mt-4 font-mono text-xs text-accent">{quip.replace("…", "")}, still updating</p>}
-    </ShareableCard>
-  );
-}
-
-// Your place on each board you qualify for, with whoever's directly ahead.
-export function RanksCard({ profile: p }: CardProps) {
-  const [boards, setBoards] = useState<BoardResult[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetchLeaderboards({ handle: p.handle })
-      .then((r) => !cancelled && setBoards(r.boards))
-      .catch(() => !cancelled && setBoards([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [p.handle]);
-
-  const mine = (boards ?? [])
-    .filter((b) => b.personal)
-    .sort((a, b) => a.personal!.rank / a.total - b.personal!.rank / b.total)
-    .slice(0, 4);
-  if (boards === null || mine.length === 0) return null;
-  const best = mine[0];
-  const bestDef = BOARDS.find((d) => d.id === best.id)!;
-  return (
-    <ShareableCard
-      id="rankings"
-      eyebrow="Your rankings"
-      handle={p.handle}
-      shareText={`#${best.personal!.rank} of ${best.total} on the Bankr Wrapped "${bestDef.title}" board.`}
-    >
-      <ul className="space-y-4">
-        {mine.map((b) => {
-          const def = BOARDS.find((d) => d.id === b.id)!;
-          const ahead = b.neighbors.above;
-          return (
-            <li key={b.id} className="flex items-baseline justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-display text-lg font-bold">{def.title}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {ahead
-                    ? `next up: @${ahead.username}, ${formatBoardScore(ahead.score, def.unit)}`
-                    : "nobody ahead"}
-                </p>
-              </div>
-              <p className="shrink-0 font-display text-2xl font-extrabold">
-                #{b.personal!.rank}
-                <span className="text-sm text-muted-foreground"> / {b.total}</span>
-              </p>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-5 font-mono text-[10px] text-muted-foreground">out of everyone who's checked their Wrapped</p>
-    </ShareableCard>
+    <CardFrame ref={faceRef} eyebrow={def.eyebrow} handle={ctx.profile.handle} tone={def.tone}>
+      <Body {...ctx} />
+    </CardFrame>
   );
 }

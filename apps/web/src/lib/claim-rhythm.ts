@@ -3,6 +3,12 @@
 // card is about claims, and by day rather than by hour.
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+
+// "Tue" → "Tuesdays", for copy like "Tuesdays are payday".
+export function weekdayPlural(day: (typeof WEEKDAYS)[number]): string {
+  return WEEKDAY_NAMES[WEEKDAYS.indexOf(day)] + "s";
+}
 
 export type RhythmCell = { date: string; eth: number };
 

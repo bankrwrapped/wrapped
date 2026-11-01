@@ -70,8 +70,48 @@ test("claim calendar pads to Monday-start weeks and finds the busiest weekday", 
 
 test("board scores format by unit", () => {
   expect(formatBoardScore(1.23456, "eth")).toBe("1.235 ETH");
+  expect(formatBoardScore(0.63, "eth")).toBe("0.630 ETH");
+  expect(formatBoardScore(0.0042, "eth")).toBe("0.0042 ETH");
   expect(formatBoardScore(1, "days")).toBe("1 day");
   expect(formatBoardScore(12, "days")).toBe("12 days");
   expect(formatBoardScore(0.4, "percent")).toBe("40%");
   expect(formatBoardScore(2.66, "multiple")).toBe("2.7×");
+});
+
+import { dailySeries, daysSince, formatUsd } from "../src/lib/story-data";
+import { topPlacings } from "../src/hooks/use-ranks";
+
+test("daily series fills missing days with zero and merges same-day entries", () => {
+  expect(
+    dailySeries([
+      { date: "2026-10-03", eth: 0.1 },
+      { date: "2026-10-01", eth: 0.2 },
+      { date: "2026-10-03", eth: 0.05 },
+    ])
+  ).toEqual([
+    { date: "2026-10-01", eth: 0.2 },
+    { date: "2026-10-02", eth: 0 },
+    { date: "2026-10-03", eth: 0.15000000000000002 },
+  ]);
+  expect(dailySeries([])).toEqual([]);
+});
+
+test("usd and day helpers", () => {
+  expect(formatUsd(4_812_400)).toBe("$4.81M");
+  expect(formatUsd(12_340)).toBe("$12.3K");
+  expect(formatUsd(999)).toBe("$999");
+  expect(daysSince("2026-10-01", Date.parse("2026-10-31T12:00:00Z"))).toBe(30);
+});
+
+test("top placings rank by share of the board, skipping boards without the handle", () => {
+  const board = (id: string, rank: number | null, total: number) => ({
+    id,
+    total,
+    entries: [],
+    personal: rank === null ? null : { rank, tied: false, score: 1, walletAddress: "", username: "", displayName: "", avatarUrl: "" },
+    neighbors: { above: null, below: null },
+  });
+  const out = topPlacings([board("a", 5, 10), board("b", 2, 40), board("c", null, 5), board("d", 1, 3)] as any, 2);
+  expect(out.map((b) => b.id)).toEqual(["b", "d"]);
+  expect(topPlacings(null)).toEqual([]);
 });

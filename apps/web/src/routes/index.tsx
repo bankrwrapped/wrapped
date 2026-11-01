@@ -6,17 +6,15 @@
 //   signed-out  → Landing
 //   error       → Landing (handles its own auth-error affordance)
 //   no-account  → NoAccountState (signed in, no Bankr wallet resolved)
-//   signed-in   → fetch wrapped by handle, then the card deck
-//
-// The WebGL braid reveal is being rebuilt; when it lands it plays before
-// WrappedDeck, which stays as the shareable card view after it.
+//   signed-in   → fetch wrapped by handle, then the story and its cards
+//   (WrappedExperience)
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
 import { BuildingWrappedState } from "@/components/wrapped/BuildingWrappedState";
 import { NoAccountState } from "@/components/wrapped/NoAccountState";
-import { WrappedDeck } from "@/components/wrapped/WrappedDeck";
+import { WrappedExperience } from "@/components/wrapped/WrappedExperience";
 import { Landing } from "@/components/wrapped/Landing";
 import { useAuth } from "@/hooks/use-auth";
 import { lookupWrapped, type WrappedProfile } from "@/lib/wrapped-data";
@@ -103,7 +101,7 @@ function SignedIn({ xUsername }: { xUsername: string }) {
     return <BuildingWrappedState apiDone={profile !== null} onDone={endIntro} handle={xUsername} avatarUrl={null} />;
   }
 
-  return <WrappedDeck profile={profile} />;
+  return <WrappedExperience profile={profile} />;
 }
 
 function Checking() {

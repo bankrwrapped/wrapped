@@ -180,12 +180,13 @@ export async function searchHandles(query: string): Promise<SearchSuggestion[]> 
   }
 }
 
-// Raw ETH formatting - adaptive precision since amounts are typically small
-// decimals. No USD conversion, no pricing methodology, just the real number.
+// Raw ETH formatting. Three decimals from 0.01 up, so figures shown side by
+// side line up (0.630 next to 6.482, not 0.6300); four below that, where
+// three would round small fees to 0.
 export const formatEth = (n: number) => {
   if (n === 0) return "0 ETH";
   if (n < 0.0001) return "<0.0001 ETH";
-  if (n < 1) return `${n.toFixed(4)} ETH`;
+  if (n < 0.01) return `${n.toFixed(4)} ETH`;
   return `${n.toFixed(3)} ETH`;
 };
 
