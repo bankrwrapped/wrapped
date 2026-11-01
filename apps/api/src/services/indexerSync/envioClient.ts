@@ -129,12 +129,47 @@ export async function fetchIndexedSwapsPage(
   `;
   const data = await envioQuery<Record<string, IndexedSwapRow[]>>(chain, query, {
     chain,
-    token: tokenAddress,
+    token: tokenAddress.toLowerCase(), // the indexer stores addresses lowercased
     fromBlock: after.blockNumber,
     fromLogIndex: after.logIndex,
     limit,
   });
   return data[rootField];
+}
+
+// Which of `tokens` have any swap after `fromBlock` - one query (per chunk)
+// instead of one per token, so the 5-minute refresh only pages swaps for
+// tokens that actually traded. Uses the tokenAddress index.
+export async function fetchTokensWithSwapsAfter(
+  chain: string,
+  tokens: string[],
+  fromBlock: string,
+): Promise<Set<string>> {
+  if (!SUPPORTED_CHAINS.has(chain)) {
+    throw new Error(`fetchTokensWithSwapsAfter: unsupported chain=${chain}`);
+  }
+  const query = `
+    query ActiveTokens($chain: String!, $tokens: [String!]!, $fromBlock: numeric!) {
+      ${SWAP_ROOT_FIELD}(
+        where: { chain: { _eq: $chain }, tokenAddress: { _in: $tokens }, blockNumber: { _gt: $fromBlock } }
+        distinct_on: tokenAddress
+        order_by: [{ tokenAddress: asc }]
+      ) {
+        tokenAddress
+      }
+    }
+  `;
+  const active = new Set<string>();
+  const lower = [...new Set(tokens.map((t) => t.toLowerCase()))];
+  for (let i = 0; i < lower.length; i += 500) {
+    const data = await envioQuery<Record<string, Array<{ tokenAddress: string }>>>(chain, query, {
+      chain,
+      tokens: lower.slice(i, i + 500),
+      fromBlock,
+    });
+    for (const row of data[SWAP_ROOT_FIELD]) active.add(row.tokenAddress.toLowerCase());
+  }
+  return active;
 }
 
 // Permanent Hasura field names, per playbook §6.5 -- both chains now share
@@ -220,10 +255,10 @@ const FEE_EVENT_ROOT_FIELD = "IndexedFeeEvent";
 // double-count the same fees.
 const EARNED_FEE_EVENT_TYPES = ["Release", "StoreTokens"];
 
-// Robinhood's indexer has no launchedToken column (no Clanker there), so
-// selecting it would fail the whole query - Doppler rows are attributed by
-// tokenAddress instead, which is already the launched token.
-const CHAINS_WITH_LAUNCHED_TOKEN = new Set(["base"]);
+// Both indexers' schemas carry launchedToken (Robinhood's since the
+// wildcard fee rework). Keep this in step with the deployed schemas: selecting
+// a missing column fails the whole query.
+const CHAINS_WITH_LAUNCHED_TOKEN = new Set(["base", "robinhood"]);
 
 export async function fetchIndexedFeeEventsPage(
   chain: string,

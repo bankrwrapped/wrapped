@@ -39,11 +39,11 @@ test("fee events: keyset paging, both address cases, earned-fee types, launchedT
   expect(r.query).toContain("launchedToken");
 });
 
-test("fee events: robinhood doesn't select launchedToken (its indexer has no such column)", async () => {
+test("fee events: robinhood selects launchedToken too, from its own endpoint", async () => {
   await fetchIndexedFeeEventsPage("robinhood", "0xabc", cursorAfterBlock("0"));
   const [r] = requests;
   expect(r.url).toBe("http://envio-robinhood.test/v1/graphql");
-  expect(r.query).not.toContain("launchedToken");
+  expect(r.query).toContain("launchedToken");
   expect(r.variables.recipients).toEqual(["0xabc"]); // already lowercase: no duplicate
 });
 

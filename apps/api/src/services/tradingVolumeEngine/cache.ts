@@ -30,7 +30,7 @@ export async function getCached(
   chain: ChainId,
   address: string,
 ): Promise<CacheEntry | null> {
-  const entry = await tokenVolumeCacheRepository.get(chain, address);
+  const entry = await tokenVolumeCacheRepository.get(chain, address.toLowerCase());
   if (!entry) return null;
   // DexScreener is no longer a provider (24h volume, not lifetime - see
   // waterfall.ts). Treat entries it wrote before that as misses so the
@@ -57,7 +57,7 @@ export async function setCached(
   volumeUsd: number,
   source: VolumeSource,
 ): Promise<void> {
-  await tokenVolumeCacheRepository.set(chain, address, volumeUsd, source);
+  await tokenVolumeCacheRepository.set(chain, address.toLowerCase(), volumeUsd, source);
 }
 
 // Call this when the full provider waterfall is exhausted and nothing
@@ -68,5 +68,5 @@ export async function setNotFoundCached(
   chain: ChainId,
   address: string,
 ): Promise<void> {
-  await tokenVolumeCacheRepository.set(chain, address, 0, NOT_FOUND_SOURCE);
+  await tokenVolumeCacheRepository.set(chain, address.toLowerCase(), 0, NOT_FOUND_SOURCE);
 }

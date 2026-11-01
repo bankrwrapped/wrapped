@@ -26,6 +26,9 @@ export const env = {
   // A single shared URL cannot serve both chains — see envioClient.ts.
   ENVIO_GRAPHQL_URL_BASE: required("ENVIO_GRAPHQL_URL_BASE"),
   ENVIO_GRAPHQL_URL_ROBINHOOD: required("ENVIO_GRAPHQL_URL_ROBINHOOD"),
+  // Use the Robinhood indexer for volume (backfill + refresh) once its index
+  // has caught up. Off: Robinhood volume comes from GeckoTerminal/DexPaprika.
+  ROBINHOOD_INDEXER_ENABLED: process.env.ROBINHOOD_INDEXER_ENABLED === "true",
   // Module 14: X OAuth 2.0 (Web App / confidential client, registered in
   // X's Developer Console). Client Secret is what makes it confidential -
   // required for the token exchange, unlike a public/SPA client.

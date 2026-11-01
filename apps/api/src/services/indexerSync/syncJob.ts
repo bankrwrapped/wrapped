@@ -1,3 +1,4 @@
+import { indexedChains } from "./indexedChains";
 import { cursorAfterBlock, cursorAfterEvent, fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
 import { getDecimals } from "./decimalsService";
 import { getHistoricalPriceUsd } from "../pricingService";
@@ -90,8 +91,8 @@ export const MAX_PRICING_ATTEMPTS = 5;
 // the same token. This function assumes the claim already happened and
 // only concerns itself with doing the work and recording the outcome.
 export async function backfillToken(chain: string, tokenAddress: string): Promise<void> {
-  if (chain !== "base") {
-    throw new Error(`backfillToken: only 'base' is supported right now — got chain=${chain}`);
+  if (!indexedChains().includes(chain)) {
+    throw new Error(`backfillToken: chain=${chain} has no indexer enabled`);
   }
 
   try {

@@ -1,4 +1,5 @@
-import { cursorAfterBlock, cursorAfterEvent, fetchIndexedSwapsPage, isChainFullySynced } from "./envioClient";
+import { cursorAfterBlock, cursorAfterEvent, fetchIndexedSwapsPage, fetchTokensWithSwapsAfter, isChainFullySynced } from "./envioClient";
+import { indexedChains } from "./indexedChains";
 import { getDecimals } from "./decimalsService";
 import { groupSwapsByDay, MAX_PRICING_ATTEMPTS, priceGroupsConcurrently } from "./syncJob";
 import { indexedTokensRepository } from "../../repositories/indexedTokensRepository";
@@ -6,11 +7,21 @@ import { tokenVolumeSummaryRepository } from "../../repositories/tokenVolumeSumm
 
 
 export async function runScheduledRefresh(chain: string): Promise<void> {
-  if (chain !== "base") {
-    throw new Error(`runScheduledRefresh: only 'base' is supported right now — got chain=${chain}`);
+  if (!indexedChains().includes(chain)) {
+    throw new Error(`runScheduledRefresh: chain=${chain} has no indexer enabled`);
   }
 
-  const tokens = await indexedTokensRepository.listCompleteForRefresh(chain);
+  const all = await indexedTokensRepository.listCompleteForRefresh(chain);
+  if (all.length === 0) return;
+
+  // One batched lookup for which tokens traded since the oldest checkpoint;
+  // the rest have nothing new, so they cost no per-token query.
+  const oldest = all.reduce(
+    (min, t) => (BigInt(t.backfill_checkpoint_block ?? "0") < min ? BigInt(t.backfill_checkpoint_block ?? "0") : min),
+    BigInt(all[0].backfill_checkpoint_block ?? "0"),
+  );
+  const active = await fetchTokensWithSwapsAfter(chain, all.map((t) => t.token_address), oldest.toString());
+  const tokens = all.filter((t) => active.has(t.token_address.toLowerCase()));
 
   for (const token of tokens) {
     const tokenAddress = token.token_address;

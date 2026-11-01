@@ -2,18 +2,19 @@ import { runScheduledRefresh } from "./refreshJob";
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-let running = false;
+// Per chain: one chain's slow refresh mustn't make the other's skip.
+const running = new Set<string>();
 
 export function startRefreshSweep(chain: string): void {
   const run = async () => {
-    if (running) {
+    if (running.has(chain)) {
       console.warn(
         `[refreshSweep] previous refresh still running for chain=${chain}; skipping`,
       );
       return;
     }
 
-    running = true;
+    running.add(chain);
 
     try {
       await runScheduledRefresh(chain);
@@ -23,7 +24,7 @@ export function startRefreshSweep(chain: string): void {
         err,
       );
     } finally {
-      running = false;
+      running.delete(chain);
     }
   };
 

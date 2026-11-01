@@ -11,6 +11,7 @@ import { trustedClientId } from "./middleware/trustedClients";
 import { wrappedService } from "./services/wrappedService";
 import { startBackfillSweep } from "./services/indexerSync/backfillSweep";
 import { startRefreshSweep } from "./services/indexerSync/refreshSweep";
+import { indexedChains } from "./services/indexerSync/indexedChains";
 import { startLeaderboardRefresh } from "./services/leaderboardRefresh";
 import { getStatus, startStatusSampler } from "./services/statusService";
 import { getClientIp } from "./services/clientIp";
@@ -198,7 +199,15 @@ Bun.serve({
         return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
       try {
-        const res = await getWrappedController(req, decodeURIComponent(wrappedMatch[1]));
+        // A malformed escape (e.g. "%E0%A4%A") makes decodeURIComponent throw;
+        // that's the caller's bad handle (400), not a server error (500).
+        let handle: string;
+        try {
+          handle = decodeURIComponent(wrappedMatch[1]);
+        } catch {
+          return withCors(Response.json({ error: "Invalid handle" }, { status: 400 }), req);
+        }
+        const res = await getWrappedController(req, handle);
         return withCors(res, req);
       } catch (err) {
         // Previously leaked the raw "internal error" string straight to the
@@ -216,8 +225,10 @@ Bun.serve({
     return withCors(new Response("Not found", { status: 404 }), req);
   },
 });
-startBackfillSweep("base");
-startRefreshSweep("base");
+for (const chain of indexedChains()) {
+  startBackfillSweep(chain);
+  startRefreshSweep(chain);
+}
 startLeaderboardRefresh();
 startStatusSampler();
 

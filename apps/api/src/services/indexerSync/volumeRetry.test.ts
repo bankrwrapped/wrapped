@@ -8,6 +8,7 @@ import { test, expect, mock, beforeEach } from "bun:test";
 
 const DAY = 86400;
 let swaps: any[] = [];
+let pageCalls = 0;
 let badDays = new Set<number>();
 let attempts = 0;
 let status = "";
@@ -18,9 +19,11 @@ mock.module("./envioClient", () => ({
   cursorAfterBlock: (b: string) => ({ blockNumber: b, logIndex: 2147483647 }),
   cursorAfterEvent: (e: any) => ({ blockNumber: e.blockNumber, logIndex: e.logIndex }),
   isChainFullySynced: async () => true,
-  fetchIndexedSwapsPage: async (_c: string, _t: string, after: any) =>
+  fetchTokensWithSwapsAfter: async (_c: string, tokens: string[], from: string) =>
+    new Set(tokens.filter((t) => swaps.some((s) => s.tokenAddress === t && BigInt(s.blockNumber) > BigInt(from)))),
+  fetchIndexedSwapsPage: async (_c: string, _t: string, after: any) => (pageCalls++,
     swaps.filter((s) => BigInt(s.blockNumber) > BigInt(after.blockNumber) ||
-      (s.blockNumber === after.blockNumber && s.logIndex > after.logIndex)),
+      (s.blockNumber === after.blockNumber && s.logIndex > after.logIndex))),
 }));
 mock.module("./decimalsService", () => ({ getDecimals: async () => 0 }));
 mock.module("../pricingService", () => ({
@@ -118,4 +121,11 @@ test("backfill: after max attempts, completes with the gap recorded", async () =
   expect(status).toBe("complete");
   expect(setTotalArgs.slice(2)).toEqual([2, 1, 1]); // volume, priced count, unpriced count
   expect(attempts).toBe(0);
+});
+
+test("refresh: a token with no swaps past its checkpoint costs no per-token query", async () => {
+  swaps = [sw(90, 0, 10)]; // only before the checkpoint (100)
+  pageCalls = 0;
+  await runScheduledRefresh("base");
+  expect(pageCalls).toBe(0);
 });

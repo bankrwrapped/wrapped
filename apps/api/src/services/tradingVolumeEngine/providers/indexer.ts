@@ -7,21 +7,18 @@ import { tokenVolumeSummaryRepository } from "../../../repositories/tokenVolumeS
 import { indexedTokensRepository } from "../../../repositories/indexedTokensRepository";
 import { walletBackfillRequestsRepository } from "../../../repositories/walletBackfillRequestsRepository";
 import { triggerBackfillIfNeeded } from "../../indexerSync/backfillTrigger";
+import { indexedChains } from "../../indexerSync/indexedChains";
 
 export async function fetchIndexerVolume(
   token: TokenRef,
 ): Promise<ProviderVolumeResult | ProviderStopResult | null> {
   /*
-   * No Robinhood indexer exists yet. Registering a backfill request or
-   * checking indexed_tokens for this chain is meaningless -- there is
-   * nothing that will ever complete it, and returning stopFallback here
-   * would permanently block GeckoTerminal/DexPaprika/DexScreener from
-   * ever resolving these tokens, even when they have real, resolvable
-   * volume data right now.
-   *
-   * Remove this early-return once a Robinhood indexer exists.
+   * A chain without an enabled indexer (Robinhood until its index has caught
+   * up, see indexedChains): registering a backfill there is meaningless -
+   * nothing would complete it - and returning stopFallback would block
+   * GeckoTerminal/DexPaprika from resolving tokens they do have data for.
    */
-  if (token.chain === "robinhood") {
+  if (!indexedChains().includes(token.chain)) {
     return null;
   }
 

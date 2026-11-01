@@ -19,6 +19,8 @@ async function fetchDecimalsFromChain(chain: string, tokenAddress: string): Prom
       method: "eth_call",
       params: [{ to: tokenAddress, data: DECIMALS_SELECTOR }, "latest"],
     }),
+    // Same bound as baseRpc's eth_call: a stalled RPC mustn't hang pricing.
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     throw new Error(`${chain} RPC decimals() call failed: ${res.status} for ${tokenAddress}`);
