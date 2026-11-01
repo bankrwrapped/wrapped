@@ -21,15 +21,21 @@ const CHAIN_ID_MAP: Record<string, number> = {
   robinhood: 4663,
 };
 
+const ENVIO_QUERY_TIMEOUT_MS = Number(process.env.ENVIO_QUERY_TIMEOUT_MS ?? 15_000);
+
 async function envioQuery<T>(chain: string, query: string, variables: Record<string, unknown>): Promise<T> {
   const url = ENDPOINT_MAP[chain];
   if (!url) {
     throw new Error(`envioQuery: no Envio endpoint configured for chain=${chain}`);
   }
+  // Bounded: an Envio that accepts the connection but never answers (crash
+  // loop, overload) used to hang every caller - the refresh sweep's
+  // `running` flag stayed set and /api/wrapped ran past Bun's idleTimeout.
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(ENVIO_QUERY_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Envio GraphQL request failed: ${res.status}`);

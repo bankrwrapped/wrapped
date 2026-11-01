@@ -66,9 +66,18 @@ export async function fetchGeckoTerminalPriceAtTimestamp(
     resolvedPoolId = pool.address;
   }
 
+  // A pool's candles default to its BASE token. Without `token`, asking for
+  // WETH's price on a meme/WETH pool returned the meme token's price, which
+  // callers then cached permanently as WETH's price for that day. Always
+  // name the token being priced; with no token there's no way to know which
+  // side is wanted, so don't guess.
+  if (!tokenAddress) {
+    console.log(`[pricing] gecko-skip reason=no-token-to-price chain=${chain} pool=${resolvedPoolId}`);
+    return null;
+  }
   const url =
     `${BASE_URL}/networks/${network}/pools/${resolvedPoolId}/ohlcv/hour` +
-    `?aggregate=1&limit=1&currency=usd&before_timestamp=${unixSeconds + 1}`;
+    `?aggregate=1&limit=1&currency=usd&token=${tokenAddress.toLowerCase()}&before_timestamp=${unixSeconds + 1}`;
 
   const res = await fetchWithRateLimitRetry(url);
   if (!res) {

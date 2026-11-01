@@ -49,7 +49,18 @@ const PENDING_TRADING_VOLUME: WrappedTradingVolume = {
   updatedAt: new Date(0).toISOString(),
 };
 
-const volumeComputationsInFlight = new Set<string>();
+// One volume computation per wallet at a time; callers that arrive while one
+// runs share its promise instead of being told "nothing" (which used to drop
+// wrappedNotify's one-time ready notification).
+const volumeComputationsInFlight = new Map<string, Promise<WrappedTradingVolume>>();
+
+function computeVolumeOnce(wallet: string, refs: ReturnType<typeof buildVolumeTokenRefs>): Promise<WrappedTradingVolume> {
+  const running = volumeComputationsInFlight.get(wallet);
+  if (running) return running;
+  const p = computeAndStoreTradingVolume(wallet, refs).finally(() => volumeComputationsInFlight.delete(wallet));
+  volumeComputationsInFlight.set(wallet, p);
+  return p;
+}
 const wrappedRequestsInFlight = new Map<string, Promise<WrappedCacheRow | null>>();
 
 function normalizeSource(raw: string): TokenSource {
@@ -83,6 +94,7 @@ async function computeAndStoreTradingVolume(wallet: string, refs: TokenRef[]): P
     status: "ok",
     isComplete: result.isComplete,
     tokensTotal: result.tokensTotal,
+    tokensCovered: refs.length,
     tokensComplete: result.tokensComplete,
     tokensInProgress: result.tokensInProgress,
     tokensPending: result.tokensPending,
@@ -96,22 +108,17 @@ async function computeAndStoreTradingVolume(wallet: string, refs: TokenRef[]): P
 
 // Awaited (not fire-and-forget) recompute for a wallet's cached tokens, for
 // callers that must act on the fresh result - wrappedNotify, after a token's
-// backfill completes. Returns null if there's no cached profile, nothing to
-// compute, or a computation for this wallet is already in flight (that one
-// will store its own result).
+// backfill completes. Returns null if there's no cached profile or nothing to
+// compute. If a computation for this wallet is already running, it waits for
+// that one and returns its result.
 async function refreshTradingVolumeNow(wallet: string): Promise<WrappedTradingVolume | null> {
-  if (volumeComputationsInFlight.has(wallet)) return null;
+  const running = volumeComputationsInFlight.get(wallet);
+  if (running) return running.catch(() => null);
   const cached = await wrappedCacheRepository.findByWallet(wallet);
   if (!cached) return null;
   const refs = buildVolumeTokenRefs(wallet, cached.payload.tokens);
   if (refs.length === 0) return null;
-
-  volumeComputationsInFlight.add(wallet);
-  try {
-    return await computeAndStoreTradingVolume(wallet, refs);
-  } finally {
-    volumeComputationsInFlight.delete(wallet);
-  }
+  return computeVolumeOnce(wallet, refs);
 }
 
 function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]): void {
@@ -125,10 +132,8 @@ function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]
     return;
   }
 
-  volumeComputationsInFlight.add(wallet);
   console.log("[wrappedService] triggerTradingVolumeRefresh: starting background compute for " + wallet + ", " + refs.length + " token(s)");
-
-  computeAndStoreTradingVolume(wallet, refs)
+  computeVolumeOnce(wallet, refs)
     .then((tradingVolume) => {
       console.log(
         "[wrappedService] triggerTradingVolumeRefresh: done for " + wallet +
@@ -137,17 +142,20 @@ function triggerTradingVolumeRefresh(wallet: string, tokens: WrappedTokenEntry[]
     })
     .catch((err) => {
       console.error("[wrappedService] triggerTradingVolumeRefresh: failed for " + wallet, err);
-    })
-    .finally(() => {
-      volumeComputationsInFlight.delete(wallet);
     });
 }
 
 export function shouldRefreshTradingVolume(
   tv: WrappedTradingVolume | undefined,
+  tokens?: WrappedTokenEntry[],
 ): boolean {
   // No volume result yet: compute it.
   if (!tv || tv.status === "pending") return true;
+
+  // The wallet's token set changed (a new launch): the stored number, even a
+  // "complete" one, doesn't cover it. Results from before tokensCovered
+  // existed are recomputed once to record it.
+  if (tokens && buildVolumeTokenRefs("", tokens).length !== tv.tokensCovered) return true;
 
   // Computed under an older methodology: recompute once, even if complete.
   if ((tv.methodVersion ?? 0) < TRADING_VOLUME_METHOD_VERSION) return true;
@@ -236,15 +244,16 @@ async function fetchEarningsFromIndexer(
     throw err;
   });
 
+  let raceTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     const breakdown = await Promise.race([
       breakdownPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
+      new Promise<never>((_, reject) => {
+        raceTimer = setTimeout(
           () => reject(new Error(`fetchEarningsFromIndexer: timed out after ${FETCH_TIMEOUT_MS}ms`)),
           FETCH_TIMEOUT_MS
-        )
-      ),
+        );
+      }),
     ]);
     console.log(
       "[wrappedService] fetchEarningsFromIndexer: done, totalEth=" + breakdown.totalEth +
@@ -267,6 +276,8 @@ async function fetchEarningsFromIndexer(
   } catch (err) {
     console.log("[wrappedService] fetchEarningsFromIndexer: failed, err=" + String(err));
     return { data: 0, status: "unavailable", byToken: {}, incomplete: false, clankerIncomplete: false };
+  } finally {
+    clearTimeout(raceTimer);
   }
 }
 
@@ -545,7 +556,16 @@ interface SideSummary {
 // in the last 90 days + claimable now, quote side only. Per Clanker token:
 // lifetime credits when verified; else its claims, plus the wallet's
 // on-chain claimable when it's the side's only Clanker token.
-function summarizeSide(entries: FeeEntry[], legs: QuoteLegValue[], clanker: ClankerSide): SideSummary {
+// `countedClanker` is shared by both sides: with verified per-token credits
+// (earnedByToken is the wallet's lifetime credit per token), a token listed on
+// the creator AND Please Bro side, or twice on one side, would otherwise add
+// its full credit to the totals each time. Every entry still shows its fees.
+function summarizeSide(
+  entries: FeeEntry[],
+  legs: QuoteLegValue[],
+  clanker: ClankerSide,
+  countedClanker: Set<string> = new Set()
+): SideSummary {
   const keep = dedupeClankerClaims(entries);
   const clankerIdx = entries.flatMap((t, i) => (t.source === "clanker" && keep[i] ? [i] : []));
   const out: SideSummary = {
@@ -573,7 +593,13 @@ function summarizeSide(entries: FeeEntry[], legs: QuoteLegValue[], clanker: Clan
         out.dopplerClaimableEth += leg.claimableEth;
         if (leg.isWethQuote) out.dopplerWethClaimedEth += leg.claimedEth;
       }
-      if (t.source === "clanker" && clanker.earnedByToken) out.clankerEth += fees;
+      if (t.source === "clanker" && clanker.earnedByToken) {
+        const key = bankrTokenKey(t.chain, t.tokenAddress);
+        if (!countedClanker.has(key)) {
+          countedClanker.add(key);
+          out.clankerEth += fees;
+        }
+      }
       out.claimCount += t.claimed?.count ?? 0;
     }
     out.tokens.push({
@@ -715,8 +741,9 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   // wallet launched Clanker tokens, else to Please Bro.
   const clankerOnCreator = creator.tokens.some((t) => t.source === "clanker");
   const noClanker: ClankerSide = { claimableEth: 0, earnedByToken: clankerSide.earnedByToken };
-  const c = summarizeSide(creator.tokens, creatorLegs, clankerOnCreator ? clankerSide : noClanker);
-  const p = summarizeSide(beneficiary.tokens, pleaseBroLegs, clankerOnCreator ? noClanker : clankerSide);
+  const countedClanker = new Set<string>();
+  const c = summarizeSide(creator.tokens, creatorLegs, clankerOnCreator ? clankerSide : noClanker, countedClanker);
+  const p = summarizeSide(beneficiary.tokens, pleaseBroLegs, clankerOnCreator ? noClanker : clankerSide, countedClanker);
   // v3.1 launches count as the wallet's launches (count, Builder Type,
   // volume) alongside Bankr's list.
   const listed = new Set(c.tokens.map((t) => bankrTokenKey(t.chain, t.tokenAddress)));
@@ -967,10 +994,21 @@ export function mergeWithCache(
   // degraded - or incomplete). Keep the previous indexer-sourced figures
   // whole instead of flipping the wallet back to Bankr's number, or mixing
   // the two through the Bankr carry-forward above.
+  //
+  // Only while the token lists are unchanged: carried across a new launch,
+  // the old list (without it) stayed on the cards indefinitely while
+  // summary.tokensLaunched counted it, so cards and leaderboards disagreed
+  // and earnings froze for as long as the indexer number stayed incomplete.
+  const tokenKeys = (ts: WrappedTokenEntry[]) =>
+    ts.map((t) => bankrTokenKey(t.chain, t.tokenAddress)).sort().join(",");
+  const sameTokens =
+    tokenKeys(fresh.tokens) === tokenKeys(previous.tokens) &&
+    tokenKeys(fresh.pleaseBroTokens) === tokenKeys(previous.pleaseBroTokens);
   if (
     indexerEarningsEnabled() &&
     fresh.meta.earningsSource !== "indexer" &&
-    previous.meta.earningsSource === "indexer"
+    previous.meta.earningsSource === "indexer" &&
+    sameTokens
   ) {
     console.log("[wrappedService] mergeWithCache: indexer earnings not usable this fetch, keeping previous indexer-sourced earnings");
     merged.earnings = previous.earnings;
@@ -1007,7 +1045,7 @@ async function getWrappedInner(handle: string): Promise<WrappedCacheRow | null> 
   const now = Date.now();
   if (cached && now - Date.parse(cached.updatedAt) < STALE_MS) {
     console.log("[wrappedService] serving from cache, no Bankr refetch");
-    if (shouldRefreshTradingVolume(cached.payload.tradingVolume)) {
+    if (shouldRefreshTradingVolume(cached.payload.tradingVolume, cached.payload.tokens)) {
       triggerTradingVolumeRefresh(match.evmAddress, cached.payload.tokens);
     } else {
       const tv = cached.payload.tradingVolume;
@@ -1032,7 +1070,7 @@ async function getWrappedInner(handle: string): Promise<WrappedCacheRow | null> 
   );
   console.log("[wrappedService] upsert done");
 
-  if (shouldRefreshTradingVolume(row.payload.tradingVolume)) {
+  if (shouldRefreshTradingVolume(row.payload.tradingVolume, row.payload.tokens)) {
     triggerTradingVolumeRefresh(match.evmAddress, row.payload.tokens);
   } else {
     const tv = row.payload.tradingVolume;

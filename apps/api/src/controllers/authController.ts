@@ -98,7 +98,13 @@ export async function handleXCallback(req: Request): Promise<Response> {
     }
 
     const xUser = await authService.fetchXUser(tokenRes.access_token);
-    const match = await wrappedService.resolveWallet(xUser.username);
+    // The wallet is optional here (getMe re-resolves sessions stored with a
+    // null evmAddress), so a Bankr outage mustn't fail the whole sign-in -
+    // the single-use auth code is already spent by this point.
+    const match = await wrappedService.resolveWallet(xUser.username).catch((err) => {
+      console.warn("[auth] wallet lookup failed during sign-in; continuing without it:", String(err));
+      return null;
+    });
 
     const sessionId = sessionCrypto.generateSessionId();
     const expiresAt = new Date(Date.now() + SESSION_LIFETIME_DAYS * 24 * 60 * 60 * 1000);

@@ -113,6 +113,12 @@ test("volume refresh rule", () => {
   // Incomplete: gated to once per 15 min instead of every request.
   expect(shouldRefreshTradingVolume(tv({}))).toBe(false);
   expect(shouldRefreshTradingVolume(tv({ updatedAt: new Date(Date.now() - 16 * 60_000).toISOString() }))).toBe(true);
+  // A complete number is recomputed when the wallet has launched since.
+  const two = [{ chain: "base" }, { chain: "robinhood" }] as any;
+  expect(shouldRefreshTradingVolume(tv({ isComplete: true, tokensCovered: 2 }), two)).toBe(false);
+  expect(shouldRefreshTradingVolume(tv({ isComplete: true, tokensCovered: 1 }), two)).toBe(true);
+  // Stored before tokensCovered existed: recomputed once to record it.
+  expect(shouldRefreshTradingVolume(tv({ isComplete: true }), two)).toBe(true);
 });
 
 test("handle -> wallet is cached (case-insensitive) instead of hitting Bankr every request", async () => {
@@ -315,6 +321,12 @@ test("switch on: a previous indexer-sourced result is kept rather than flipping 
   expect(merged.meta.earningsSource).toBe("indexer");
   expect(merged.earnings.totalEth).toBeCloseTo(0.55, 10);
   expect(merged.tokens[0].feesEarnedEth).toBeCloseTo(0.35, 10);
+
+  // A new launch since: the fresh list (with it) is used, not the old one.
+  const launched = { ...fresh, tokens: [...fresh.tokens, { ...fresh.tokens[0], tokenAddress: "0xnew" }] };
+  const afterLaunch = mergeWithCache(launched, previous);
+  expect(afterLaunch.meta.earningsSource).toBe("bankr");
+  expect(afterLaunch.tokens.map((t) => t.tokenAddress)).toContain("0xnew");
 
   // Switched back off: Bankr's number wins again.
   delete process.env.EARNINGS_SOURCE;

@@ -161,14 +161,23 @@ export const wrappedCacheRepository = {
 
   // Profiles not refreshed since `olderThan`, stalest first - for the
   // leaderboard refresh (services/leaderboardRefresh.ts).
-  async listStale(olderThan: Date, limit: number): Promise<Array<{ username: string; updatedAt: string }>> {
+  async listStale(
+    olderThan: Date,
+    limit: number,
+    skipWallets: string[] = []
+  ): Promise<Array<{ username: string; walletAddress: string; updatedAt: string }>> {
     const rows = (await db`
-      select username, updated_at from wrapped_profiles
+      select username, wallet_address, updated_at from wrapped_profiles
       where updated_at < ${olderThan}
+        and not (wallet_address = any(${skipWallets}::text[]))
       order by updated_at asc, wallet_address asc
       limit ${limit}
-    `) as Array<{ username: string; updated_at: string }>;
-    return rows.map((r) => ({ username: r.username, updatedAt: new Date(r.updated_at).toISOString() }));
+    `) as Array<{ username: string; wallet_address: string; updated_at: string }>;
+    return rows.map((r) => ({
+      username: r.username,
+      walletAddress: r.wallet_address,
+      updatedAt: new Date(r.updated_at).toISOString(),
+    }));
   },
 
   // Powers the marketing / partnership leaderboard. Wired to GET /api/leaderboard.

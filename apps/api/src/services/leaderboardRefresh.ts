@@ -14,6 +14,18 @@ const PAUSE_MS = 2_000; // each refresh is ~3 Bankr calls plus pricing
 
 let running = false;
 
+// Rows whose handle no longer resolves to their wallet (handle gone, or now
+// resolving to a different wallet) can't be refreshed by handle. They used to
+// stay the stalest rows forever and take every one of the STALEST_N slots.
+// They're skipped for a day, so the rest of the stale rows get refreshed.
+const UNRESOLVABLE_SKIP_MS = 24 * 60 * 60_000;
+const unresolvable = new Map<string, number>(); // wallet -> skip until
+
+function skippedWallets(now: number): string[] {
+  for (const [wallet, until] of unresolvable) if (until <= now) unresolvable.delete(wallet);
+  return [...unresolvable.keys()];
+}
+
 export async function refreshLeaderboardRows(): Promise<number> {
   if (running) {
     console.warn("[leaderboardRefresh] previous run still going; skipping");
@@ -23,25 +35,27 @@ export async function refreshLeaderboardRows(): Promise<number> {
   try {
     const cutoff = Date.now() - MIN_AGE_MS;
     const top = await wrappedCacheRepository.getTopTraders(TOP_N);
-    const stalest = await wrappedCacheRepository.listStale(new Date(cutoff), STALEST_N);
-    const handles = [
-      ...new Set([
-        ...top.filter((t) => Date.parse(t.updatedAt) < cutoff).map((t) => t.username),
-        ...stalest.map((s) => s.username),
-      ]),
-    ];
+    const stalest = await wrappedCacheRepository.listStale(new Date(cutoff), STALEST_N, skippedWallets(Date.now()));
+    const rows = new Map<string, string>(); // handle -> the wallet its row is for
+    for (const t of top) if (Date.parse(t.updatedAt) < cutoff) rows.set(t.username, t.walletAddress.toLowerCase());
+    for (const s of stalest) if (!rows.has(s.username)) rows.set(s.username, s.walletAddress.toLowerCase());
 
     let refreshed = 0;
-    for (const handle of handles) {
+    for (const [handle, wallet] of rows) {
       try {
-        await wrappedService.getWrapped(handle);
-        refreshed += 1;
+        const row = await wrappedService.getWrapped(handle);
+        if (row?.walletAddress?.toLowerCase() === wallet) {
+          refreshed += 1;
+        } else {
+          console.warn(`[leaderboardRefresh] ${handle} no longer resolves to ${wallet}; skipping that row for a day`);
+          unresolvable.set(wallet, Date.now() + UNRESOLVABLE_SKIP_MS);
+        }
       } catch (err) {
         console.error(`[leaderboardRefresh] refresh failed for ${handle}:`, err);
       }
       await new Promise((r) => setTimeout(r, PAUSE_MS));
     }
-    console.log(`[leaderboardRefresh] refreshed ${refreshed}/${handles.length} profile(s)`);
+    console.log(`[leaderboardRefresh] refreshed ${refreshed}/${rows.size} profile(s)`);
     return refreshed;
   } finally {
     running = false;

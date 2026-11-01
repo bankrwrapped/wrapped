@@ -13,6 +13,7 @@ import { startBackfillSweep } from "./services/indexerSync/backfillSweep";
 import { startRefreshSweep } from "./services/indexerSync/refreshSweep";
 import { startLeaderboardRefresh } from "./services/leaderboardRefresh";
 import { getStatus, startStatusSampler } from "./services/statusService";
+import { getClientIp } from "./services/clientIp";
 
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -55,24 +56,6 @@ function tooManyRequests(retryAfterSeconds: number): Response {
   );
 }
 
-// Railway sits in front of this app behind its own edge proxy, so
-// server.requestIP() returns RAILWAY'S internal address for every request,
-// not the visitor's - previously this silently collapsed every real user
-// into one shared rate-limit bucket, meaning one active visitor could get
-// everyone else 429'd. Railway forwards the real client via X-Forwarded-For
-// (first entry in the comma-separated chain is the original client).
-// Falls back to the raw socket IP only when the header is absent (local
-// dev with no proxy in front) - Railway always sets this header in
-// production, so this fallback never fires there.
-function getClientIp(req: Request, server: Bun.Server<undefined>): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return server.requestIP(req)?.address ?? "unknown";
-}
-
 Bun.serve({
   port: PORT,
   // Default is 10s, which is too tight for a cold request doing 3 parallel
@@ -99,7 +82,7 @@ Bun.serve({
       return withCors(Response.json({ status: "ok" }), req);
     }
     if (url.pathname === "/api/status" && req.method === "GET") {
-      const limit = checkStatusRouteLimit(getClientIp(req, server));
+      const limit = checkStatusRouteLimit(getClientIp(req, server.requestIP(req)?.address));
       if (!limit.allowed) {
         return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
@@ -117,7 +100,7 @@ Bun.serve({
       return handleXCallback(req);
     }
     if (url.pathname === "/api/auth/me" && req.method === "GET") {
-      const limit = checkAuthMeRouteLimit(getClientIp(req, server));
+      const limit = checkAuthMeRouteLimit(getClientIp(req, server.requestIP(req)?.address));
       if (!limit.allowed) {
         return withCors(tooManyRequests(limit.retryAfterSeconds), req);
       }
@@ -130,7 +113,7 @@ Bun.serve({
       }
     }
     if (url.pathname === "/api/search" && req.method === "GET") {
-      const clientIp = getClientIp(req, server);
+      const clientIp = getClientIp(req, server.requestIP(req)?.address);
       const limit = checkSearchSuggestRouteLimit(clientIp);
       if (!limit.allowed) {
         return withCors(tooManyRequests(limit.retryAfterSeconds), req);
@@ -207,7 +190,7 @@ Bun.serve({
     }
     const wrappedMatch = url.pathname.match(/^\/api\/wrapped\/([^/]+)$/);
     if (wrappedMatch && req.method === "GET") {
-      const clientIp = getClientIp(req, server);
+      const clientIp = getClientIp(req, server.requestIP(req)?.address);
       const trusted = trustedClientId(req);
       const limit = trusted ? checkTrustedWrappedRouteLimit(trusted) : checkWrappedRouteLimit(clientIp);
       if (!limit.allowed) {

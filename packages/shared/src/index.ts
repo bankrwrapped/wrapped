@@ -126,6 +126,10 @@ export interface WrappedTradingVolume {
   tokensInProgress: number;
   tokensPending: number;
   tokensFailed: number;
+  // How many tokens (Base/Robinhood launches) this result covers. When the
+  // wallet's count differs, a new launch isn't in the number yet. Missing on
+  // results stored before it existed.
+  tokensCovered?: number;
   updatedAt: string;
   // Which volume methodology produced this result (see
   // TRADING_VOLUME_METHOD_VERSION in apps/api wrappedService.ts). Missing on

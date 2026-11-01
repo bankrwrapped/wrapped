@@ -43,22 +43,29 @@ export async function resolveTokenVolume(
   token: TokenRef,
 ): Promise<TokenVolumeResult> {
   const cached = await getCached(token.chain, token.address);
+  const fromCache = (c: NonNullable<typeof cached>): TokenVolumeResult => ({
+    token,
+    volumeUsd: c.resolved ? c.volumeUsd : null,
+    source: c.resolved ? (c.source as TokenVolumeResult["source"]) : null,
+    resolved: c.resolved,
+    cached: true,
+  });
 
-  if (cached) {
-    return {
-      token,
-      volumeUsd: cached.resolved ? cached.volumeUsd : null,
-      source: cached.resolved ? (cached.source as TokenVolumeResult["source"]) : null,
-      resolved: cached.resolved,
-      cached: true,
-    };
-  }
+  // Only an indexer-sourced entry may skip the indexer. An external figure
+  // (or "not found") cached on a token's cold start used to keep being served
+  // for the whole TTL after the indexer's backfill finished - and then got
+  // frozen as the wallet's "complete" volume. So the indexer is always asked
+  // first (its lookups are cheap); a cached external figure only stands in
+  // for the external providers below.
+  if (cached && cached.source === "indexer") return fromCache(cached);
 
   for (const provider of PROVIDERS) {
     // The indexer only sees Uniswap V4 swaps: asked about a V3 (Clanker
     // v3.1) token it would backfill zero swaps and report $0 as complete,
     // stopping the fallback to providers that do have the pool.
     if (provider === fetchIndexerVolume && token.source === "clanker_v3_1") continue;
+    // Past the indexer, a cached external answer replaces the external calls.
+    if (provider !== fetchIndexerVolume && cached) return fromCache(cached);
     const result = await provider(token);
 
     /*
