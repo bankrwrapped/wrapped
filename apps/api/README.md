@@ -9,8 +9,6 @@ The Bankr Wrapped backend: raw `Bun.serve` with hand-rolled routing, Postgres th
 | `GET /api/wrapped/:handle` | Assembled Wrapped payload for an X/Bankr handle (rate-limited 20/min per IP) |
 | `GET /api/leaderboard` | Top 20, ranked by ETH earned |
 | `GET /api/search?query=` | Handle typeahead (60/min per IP) |
-| `GET /api/auth/me` | Current session (30/min per IP) |
-| `GET /auth/x/login`, `GET /auth/x/callback` | X OAuth 2.0 (PKCE). The frontend proxies these on bankrwrapped.com |
 | `GET /api/image-proxy?url=` | CORS-safe avatar proxy for share-card capture (allowlisted hosts, 5 MB cap) |
 | `GET /health` | Liveness |
 
@@ -44,10 +42,6 @@ GOLDRUSH_API_KEY
 BASE_RPC_URL
 ENVIO_GRAPHQL_URL_BASE
 ENVIO_GRAPHQL_URL_ROBINHOOD
-X_CLIENT_ID
-X_CLIENT_SECRET
-X_REDIRECT_URI            # https://bankrwrapped.com/auth/x/callback in production
-SESSION_ENC_KEY           # openssl rand -hex 32
 ```
 
 Optional:
@@ -80,7 +74,7 @@ bun run dev
 ```
 src/
   index.ts            routing, CORS, rate limits
-  controllers/        HTTP handlers (wrapped, auth)
+  controllers/        HTTP handlers (wrapped, install capture)
   services/           wrapped assembly, pricing, on-chain earnings,
                       tradingVolumeEngine/ (provider waterfall),
                       indexerSync/ (Envio client, backfill/refresh jobs, notify)

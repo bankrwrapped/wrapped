@@ -1,5 +1,5 @@
 // Boots the real API entry (src/index.ts) in a child process and checks
-// route wiring: /api/auth/me is rate-limited, the image proxy refuses
+// route wiring: the removed X sign-in routes 404, the image proxy refuses
 // non-allowlisted hosts. No DB is needed for these paths.
 import "./test/setupEnv";
 import { test, expect, beforeAll, afterAll } from "bun:test";
@@ -31,15 +31,10 @@ test("health", async () => {
   expect(await (await fetch(`${BASE}/health`)).json()).toEqual({ status: "ok" });
 });
 
-test("/api/auth/me: 401 without a session, 429 after 30/min from one IP", async () => {
-  const hit = () => fetch(`${BASE}/api/auth/me`, { headers: { "x-forwarded-for": "198.51.100.23" } });
-  const statuses: number[] = [];
-  for (let i = 0; i < 31; i++) statuses.push((await hit()).status);
-  expect(statuses.slice(0, 30).every((s) => s === 401)).toBe(true);
-  expect(statuses[30]).toBe(429);
-  // A different visitor isn't affected.
-  const other = await fetch(`${BASE}/api/auth/me`, { headers: { "x-forwarded-for": "198.51.100.99" } });
-  expect(other.status).toBe(401);
+test("X sign-in is gone: its routes 404 (Wrapped is a public lookup)", async () => {
+  for (const path of ["/api/auth/me", "/auth/x/login", "/auth/x/callback"]) {
+    expect((await fetch(`${BASE}${path}`)).status).toBe(404);
+  }
 });
 
 test("image proxy refuses non-allowlisted hosts", async () => {

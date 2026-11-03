@@ -26,17 +26,4 @@ export const env = {
   // A single shared URL cannot serve both chains — see envioClient.ts.
   ENVIO_GRAPHQL_URL_BASE: required("ENVIO_GRAPHQL_URL_BASE"),
   ENVIO_GRAPHQL_URL_ROBINHOOD: required("ENVIO_GRAPHQL_URL_ROBINHOOD"),
-  // Module 14: X OAuth 2.0 (Web App / confidential client, registered in
-  // X's Developer Console). Client Secret is what makes it confidential -
-  // required for the token exchange, unlike a public/SPA client.
-  X_CLIENT_ID: required("X_CLIENT_ID"),
-  X_CLIENT_SECRET: required("X_CLIENT_SECRET"),
-  // Must exact-match a Callback URL registered in the X Developer Console -
-  // https://bankrwrapped.com/auth/x/callback in production. It goes through
-  // the frontend's same-origin proxy (apps/web/src/server.ts) so the PKCE
-  // and session cookies are first-party on bankrwrapped.com.
-  X_REDIRECT_URI: required("X_REDIRECT_URI"),
-  // 64-char hex (32 bytes) - generate with `openssl rand -hex 32`. Encrypts
-  // refresh tokens at rest in the sessions table (see sessionCrypto.ts).
-  SESSION_ENC_KEY: required("SESSION_ENC_KEY"),
 };

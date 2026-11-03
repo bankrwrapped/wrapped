@@ -55,10 +55,6 @@ export const checkWrappedRouteLimit = createRateLimiter(60_000, 20);
 // for a bot serving many users.
 export const checkTrustedWrappedRouteLimit = createRateLimiter(60_000, 600);
 
-// /api/auth/me runs on every page load (useAuth on mount) and hits the DB,
-// plus Bankr for wallet-less sessions - previously unlimited.
-export const checkAuthMeRouteLimit = createRateLimiter(60_000, 30);
-
 // Bankr re-resolve for a session that had no wallet at login: at most once
 // per 5 minutes per session (keyed by session id), instead of on every
 // /api/auth/me call.

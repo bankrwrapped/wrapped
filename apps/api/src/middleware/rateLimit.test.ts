@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createRateLimiter, checkAuthMeRouteLimit, checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./rateLimit";
+import { createRateLimiter, checkSearchSuggestRouteLimit, checkWrappedRouteLimit } from "./rateLimit";
 
 test("limits within a window", () => {
   const check = createRateLimiter(60_000, 2);
@@ -17,5 +17,4 @@ test("each limiter has its own buckets - search typing can't eat the wrapped bud
   expect(checkSearchSuggestRouteLimit(ip).allowed).toBe(false);
   // Previously one shared per-IP bucket: these would already be 429.
   expect(checkWrappedRouteLimit(ip).allowed).toBe(true);
-  expect(checkAuthMeRouteLimit(ip).allowed).toBe(true);
 });

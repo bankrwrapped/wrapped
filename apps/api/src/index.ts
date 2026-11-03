@@ -1,7 +1,5 @@
 import { getLeaderboardController, getLeaderboardsController, getWrappedController } from "./controllers/wrappedController";
-import { startXLogin, handleXCallback, getMe } from "./controllers/authController";
 import {
-  checkAuthMeRouteLimit,
   checkSearchSuggestRouteLimit,
   checkStatusRouteLimit,
   checkTrustedWrappedRouteLimit,
@@ -108,25 +106,6 @@ Bun.serve({
       } catch (err) {
         console.error("[api] status request failed:", err);
         return withCors(Response.json({ error: "status unavailable" }, { status: 500 }), req);
-      }
-    }
-    if (url.pathname === "/auth/x/login" && req.method === "GET") {
-      return startXLogin(req);
-    }
-    if (url.pathname === "/auth/x/callback" && req.method === "GET") {
-      return handleXCallback(req);
-    }
-    if (url.pathname === "/api/auth/me" && req.method === "GET") {
-      const limit = checkAuthMeRouteLimit(getClientIp(req, server));
-      if (!limit.allowed) {
-        return withCors(tooManyRequests(limit.retryAfterSeconds), req);
-      }
-      try {
-        const res = await getMe(req);
-        return withCors(res, req);
-      } catch (err) {
-        console.error("[api] /api/auth/me failed:", err);
-        return withCors(Response.json({ authenticated: false }, { status: 500 }), req);
       }
     }
     if (url.pathname === "/api/search" && req.method === "GET") {

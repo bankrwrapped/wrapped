@@ -5,11 +5,11 @@ Last reviewed: 2026-10-17. Fixes listed here are on branch `dabushkabash`, cover
 ## Before the next deploy
 
 1. ~~Run `apps/api/db/schema.sql` against production.~~ **Done 2026-10-17** (`pricing_attempts` present; 2 stringified `tradingVolume` rows repaired).
-2. ~~Set `X_REDIRECT_URI`~~ **Done.** Register `https://bankrwrapped.com/auth/x/callback` in the X Developer Console if not already.
+2. ~~Set `X_REDIRECT_URI`~~ **No longer needed:** X sign-in was removed (2026-11-03); Wrapped is a public handle lookup. `X_CLIENT_ID`, `X_CLIENT_SECRET`, `X_REDIRECT_URI` and `SESSION_ENC_KEY` can be deleted from the API env, and the `sessions` table can be dropped once the new API is live.
 3. ~~`WRAPPED_WEBHOOK_SECRET`~~ **Verified 2026-10-17: it matches on both sides.** A request with an unparseable body, signed with the API's secret, got the webhook's `400 invalid json` (past the signature check, so no prompt and no post); a wrongly signed one got `401 invalid signature`. If it ever needs re-checking, repeat that probe: signed with the real secret, an invalid-JSON body can't produce a tweet.
 4. **Re-index the Base indexer: automatic on merge.** Since about 15:55 on 2026-10-17 the indexer has been crash-looping: `storage was initialized by an older envio version`. Envio won't resume that data, so nothing new has been indexed since. The new start wrapper (`apps/indexer/scripts/start.ts`) starts over **once** when Envio reports incompatible storage, and otherwise resumes, so Railway's automatic restarts keep filling the same data instead of wiping it. No manual `envio start -r` and no start-command edits. The re-index takes about 2 hours plus Clanker v3.1 from block 27,733,337. Until it catches up, indexer numbers show as unavailable or partial; displayed earnings (Bankr) are unaffected, and volume backfills don't mark tokens complete before the chain is synced.
 5. After deploying:
-   - test sign-in on an iPhone (Safari)
+   - test the handle lookup on an iPhone (Safari)
    - check that client IPs vary in the API logs. If they don't, Railway is overwriting the worker's `X-Forwarded-For`, and every visitor shares one rate-limit bucket.
 
 ## Next up

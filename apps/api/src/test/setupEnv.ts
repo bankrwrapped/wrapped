@@ -12,10 +12,6 @@ const fixed: Record<string, string> = {
   ROBINHOOD_RPC_URL: "http://robinhood-rpc.test",
   ENVIO_GRAPHQL_URL_BASE: "http://envio-base.test/v1/graphql",
   ENVIO_GRAPHQL_URL_ROBINHOOD: "http://envio-robinhood.test/v1/graphql",
-  X_CLIENT_ID: "test-client",
-  X_CLIENT_SECRET: "test-secret",
-  X_REDIRECT_URI: "https://bankrwrapped.com/auth/x/callback",
-  SESSION_ENC_KEY: "11".repeat(32),
 };
 for (const [k, v] of Object.entries(fixed)) process.env[k] = v;
 delete process.env.WRAPPED_WEBHOOK_SECRET;
