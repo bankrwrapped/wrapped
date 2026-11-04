@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useCountUp } from "@/hooks/use-count-up";
 import { tokenHue, tokenInitials } from "@/lib/token-badge";
 import type { TokenEntry } from "@/lib/wrapped-data";
+import { useFx } from "./fx";
 
 export const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -66,14 +67,14 @@ export function FadeUp({
   );
 }
 
-// A title that lands: scales down out of a blur.
+// A title that lands: scales down as it fades in.
 export function Slam({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
   const reduce = useReducedMotion();
   return (
     <motion.div
       className={className}
-      initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.5, filter: "blur(14px)" }}
-      animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, filter: "blur(0px)" }}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.3 }}
+      animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
       transition={{ duration: 0.8, ease: EASE, delay }}
     >
       {children}
@@ -127,9 +128,13 @@ const ORB_PATHS = [
   { x: ["0%", "20%", "0%"], y: ["20%", "-5%", "20%"], left: "-10%", top: "60%", d: 26 },
 ];
 
-// Three soft light sources drifting on long loops, a fine grid, and grain.
+// Three soft light sources drifting on long loops. Kept to transforms on
+// their own layers so weak GPUs can move them without repainting.
 export function Backdrop({ palette, intensity = 0.55 }: { palette: Palette; intensity?: number }) {
+  // Still (not drifting) when motion is reduced or effects are lite.
   const reduce = useReducedMotion();
+  const lite = useFx() === "lite";
+  const still = reduce || lite;
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden bg-[#0b0910]">
       {ORB_PATHS.map((o, i) => (
@@ -141,22 +146,12 @@ export function Backdrop({ palette, intensity = 0.55 }: { palette: Palette; inte
             top: o.top,
             opacity: intensity,
             background: `radial-gradient(circle, ${palette[i]} 0%, transparent 62%)`,
+            willChange: still ? undefined : "transform",
           }}
-          animate={reduce ? undefined : { x: o.x, y: o.y }}
+          animate={still ? undefined : { x: o.x, y: o.y }}
           transition={{ duration: o.d, repeat: Infinity, ease: "easeInOut" }}
         />
       ))}
-      <div
-        className="absolute inset-0 opacity-[0.07]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)",
-          backgroundSize: "56px 56px",
-          maskImage: "radial-gradient(ellipse at center, black 30%, transparent 75%)",
-          WebkitMaskImage: "radial-gradient(ellipse at center, black 30%, transparent 75%)",
-        }}
-      />
-      <Grain />
     </div>
   );
 }

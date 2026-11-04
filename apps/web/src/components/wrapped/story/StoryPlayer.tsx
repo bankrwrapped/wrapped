@@ -11,6 +11,7 @@ import { AnimatePresence, motion, useReducedMotion, type Transition, type Varian
 import { Pause, Play, Volume2, VolumeX, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CardContext } from "../cards/WrappedCards";
+import { createFrameSampler, useFx } from "./fx";
 import { Backdrop, COLORS, EASE } from "./motion";
 import type { Cut, Scene } from "./scenes";
 import { BAR_MS, Soundtrack, type Cue, type CutSound } from "./soundtrack";
@@ -43,9 +44,9 @@ const CUTS: Variants = {
   enter: (c: Cut) =>
     ({
       fade: { opacity: 0 },
-      zoom: { opacity: 0, scale: 0.6, filter: "blur(12px)" },
+      zoom: { opacity: 0, scale: 0.8 },
       wipe: { clipPath: "inset(0% 0% 0% 100%)" },
-      whip: { y: "100%", filter: "blur(24px)" },
+      whip: { y: "100%" },
       flash: { opacity: 0, scale: 1.08 },
       iris: { clipPath: "circle(0% at 50% 50%)" },
     })[c],
@@ -53,7 +54,6 @@ const CUTS: Variants = {
     opacity: 1,
     scale: 1,
     y: "0%",
-    filter: "blur(0px)",
     zIndex: 2,
     ...(c === "wipe" && { clipPath: "inset(0% 0% 0% 0%)" }),
     ...(c === "iris" && { clipPath: "circle(80% at 50% 50%)" }),
@@ -63,9 +63,9 @@ const CUTS: Variants = {
     zIndex: 1,
     ...{
       fade: { opacity: 0 },
-      zoom: { opacity: 0, scale: 1.6, filter: "blur(16px)" },
+      zoom: { opacity: 0, scale: 1.3 },
       wipe: { x: "-30%", opacity: 0.3 },
-      whip: { y: "-100%", filter: "blur(24px)" },
+      whip: { y: "-100%" },
       flash: { opacity: 0 },
       iris: { scale: 0.92, opacity: 0.4 },
     }[c],
@@ -91,7 +91,7 @@ function CutFx({ cut }: { cut: Cut }) {
       <motion.div
         aria-hidden
         className="pointer-events-none absolute inset-y-0 z-20 w-[18vw] min-w-24"
-        style={{ background: `linear-gradient(90deg, transparent, ${COLORS.ember}, ${COLORS.violet}, transparent)`, filter: "blur(8px)" }}
+        style={{ background: `linear-gradient(90deg, transparent, ${COLORS.ember}, ${COLORS.violet}, transparent)` }}
         initial={{ left: "100%" }}
         animate={{ left: "-20%" }}
         transition={CUT_TIMING.wipe}
@@ -123,8 +123,8 @@ function TitleCard({ handle, seconds, onStart }: { handle: string; seconds: numb
       </motion.p>
       <motion.h1
         className="mt-5 font-display text-[clamp(3rem,13vw,7.5rem)] font-extrabold leading-[0.88] tracking-tight"
-        initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.25, filter: "blur(16px)" }}
-        animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.15 }}
+        animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.4, duration: 1.1, ease: EASE }}
       >
         Your year,
@@ -178,6 +178,9 @@ function TitleCard({ handle, seconds, onStart }: { handle: string; seconds: numb
 
 export function StoryPlayer({ scenes, ctx, onFinish }: { scenes: Scene[]; ctx: CardContext; onFinish: () => void }) {
   const reduce = useReducedMotion();
+  const lite = useFx() === "lite";
+  // Camera push and beat pulse are off when motion is reduced or effects are lite.
+  const still = reduce || lite;
   const [started, setStarted] = useState(false);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -279,21 +282,33 @@ export function StoryPlayer({ scenes, ctx, onFinish }: { scenes: Scene[]; ctx: C
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
+    const sample = createFrameSampler();
     const tick = (t: number) => {
       const dt = Math.min(t - last, 100);
       last = t;
       if (startedRef.current) {
-        if (!pausedRef.current && !document.hidden) elapsed.current += dt;
+        if (!pausedRef.current && !document.hidden) {
+          elapsed.current += dt;
+          sample(dt);
+        }
         const duration = scenes[idx.current]?.duration ?? 1;
         const progress = Math.min(1, elapsed.current / duration);
         const bar = bars.current[idx.current];
         if (bar) bar.style.transform = `scaleX(${progress})`;
         const el = root.current;
         if (el) {
-          el.style.setProperty("--cam", reduce ? "0" : String(progress));
+          // Written straight onto the few elements that use them (not as CSS
+          // variables on the root, which restyles the whole story every frame).
+          const cam = `scale(${still ? 1 : 1 + progress * 0.05})`;
           // Without Web Audio, scenes start on a downbeat, so count from there.
           const phase = music.current?.beatPhase() ?? (elapsed.current / (BAR_MS / 4)) % 1;
-          el.style.setProperty("--pulse", String((1 - phase) ** 4));
+          const pulse = still ? "0" : String(Math.round((1 - phase) ** 4 * 0.35 * 100) / 100);
+          el.querySelectorAll<HTMLElement>("[data-cam]").forEach((n) => {
+            n.style.transform = cam;
+          });
+          el.querySelectorAll<HTMLElement>("[data-pulse]").forEach((n) => {
+            if (n.style.opacity !== pulse) n.style.opacity = pulse;
+          });
         }
         if (elapsed.current >= duration) go(idx.current + 1);
       }
@@ -301,7 +316,7 @@ export function StoryPlayer({ scenes, ctx, onFinish }: { scenes: Scene[]; ctx: C
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [scenes, go, reduce]);
+  }, [scenes, go, still]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -349,7 +364,9 @@ export function StoryPlayer({ scenes, ctx, onFinish }: { scenes: Scene[]; ctx: C
   const stop = (e: React.PointerEvent) => e.stopPropagation();
 
   const scene = scenes[index];
-  const cut: Cut = reduce ? "fade" : scene.cut;
+  // Lite keeps the cheap cuts (opacity and scale) and turns clip-path and
+  // full-screen slides into fades.
+  const cut: Cut = reduce || (lite && (scene.cut === "wipe" || scene.cut === "iris" || scene.cut === "whip")) ? "fade" : scene.cut;
   const totalSeconds = scenes.reduce((a, s) => a + s.duration, 0) / 1000;
   return (
     <div
@@ -376,13 +393,15 @@ export function StoryPlayer({ scenes, ctx, onFinish }: { scenes: Scene[]; ctx: C
               <Backdrop palette={scene.palette} />
               <div
                 aria-hidden
+                data-pulse
                 className="pointer-events-none absolute inset-0"
                 style={{
                   background: `radial-gradient(ellipse at 50% 115%, ${scene.palette[1]}, transparent 60%)`,
-                  opacity: "calc(var(--pulse, 0) * 0.35)",
+                  opacity: 0,
+                  willChange: "opacity",
                 }}
               />
-              <div className="absolute inset-0 pb-16 pt-24" style={{ transform: "scale(calc(1 + var(--cam, 0) * 0.05))" }}>
+              <div data-cam className="absolute inset-0 pb-16 pt-24" style={{ willChange: "transform" }}>
                 {scene.render(ctx)}
               </div>
             </motion.div>
