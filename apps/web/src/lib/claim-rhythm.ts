@@ -1,9 +1,17 @@
-// When a wallet claims, from dailyEarnings (Bankr's last 90 days, one entry
-// per claim day, UTC dates). Bankr gives no launch timestamps, so the rhythm
+// When a wallet claims, from its claim days (the indexer's last year, or
+// Bankr's last 90 days; one entry per claim day, UTC dates). Bankr gives no launch timestamps, so the rhythm
 // card is about claims, and by day rather than by hour.
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
-const WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+const WEEKDAY_NAMES = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
 
 // "Tue" → "Tuesdays", for copy like "Tuesdays are payday".
 export function weekdayPlural(day: (typeof WEEKDAYS)[number]): string {
@@ -47,7 +55,11 @@ export function claimRhythm(daily: Array<{ date: string; eth: number }>): ClaimR
       const week: Array<RhythmCell | null> = [];
       for (let i = 0; i < 7; i++) {
         const t = weekStart + i * DAY_MS;
-        week.push(t < first || t > last ? null : { date: new Date(t).toISOString().slice(0, 10), eth: ethByDate.get(t) ?? 0 });
+        week.push(
+          t < first || t > last
+            ? null
+            : { date: new Date(t).toISOString().slice(0, 10), eth: ethByDate.get(t) ?? 0 },
+        );
       }
       weeks.push(week);
     }
@@ -60,4 +72,12 @@ export function claimRhythm(daily: Array<{ date: string; eth: number }>): ClaimR
     byWeekday,
     busiestWeekday: max > 0 ? WEEKDAYS[byWeekday.indexOf(max)] : null,
   };
+}
+
+// A calendar longer than half a year split into two stacked halves, so the
+// cells stay a readable size; shorter ones come back as a single block.
+export function calendarBlocks<T>(weeks: T[]): T[][] {
+  if (weeks.length <= 27) return [weeks];
+  const half = Math.ceil(weeks.length / 2);
+  return [weeks.slice(0, half), weeks.slice(half)];
 }

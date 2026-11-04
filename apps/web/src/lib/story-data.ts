@@ -18,14 +18,19 @@ export function formatDate(iso: string, opts: { short?: boolean } = {}): string 
 }
 
 export function daysSince(iso: string, now = Date.now()): number {
-  return Math.max(0, Math.floor((now - Date.parse(iso.length === 10 ? iso + "T00:00:00Z" : iso)) / 86_400_000));
+  return Math.max(
+    0,
+    Math.floor((now - Date.parse(iso.length === 10 ? iso + "T00:00:00Z" : iso)) / 86_400_000),
+  );
 }
 
 const DAY_MS = 86_400_000;
 
 // One entry per day from the first claim day to the last, zeros filled in,
 // so a chart's x axis is real time rather than claim count.
-export function dailySeries(daily: Array<{ date: string; eth: number }>): Array<{ date: string; eth: number }> {
+export function dailySeries(
+  daily: Array<{ date: string; eth: number }>,
+): Array<{ date: string; eth: number }> {
   const byDay = new Map<number, number>();
   for (const d of daily) {
     const t = Date.parse(d.date + "T00:00:00Z");
@@ -39,3 +44,29 @@ export function dailySeries(daily: Array<{ date: string; eth: number }>): Array<
   }
   return out;
 }
+
+export type ChartBar = { date: string; end: string; eth: number };
+
+// Bars for a claims chart: one per day for up to ~4 months, else one per
+// week (Monday start, summed), so a full year still fits a phone. `end` is
+// the bar's last day, for finding the bar that holds a given date.
+export function chartBars(daily: Array<{ date: string; eth: number }>): ChartBar[] {
+  const series = dailySeries(daily);
+  if (series.length <= 120) return series.map((d) => ({ ...d, end: d.date }));
+  const weeks = new Map<number, ChartBar>();
+  for (const d of series) {
+    const t = Date.parse(d.date + "T00:00:00Z");
+    const monday = t - ((new Date(t).getUTCDay() + 6) % 7) * DAY_MS;
+    const bar = weeks.get(monday) ?? {
+      date: new Date(monday).toISOString().slice(0, 10),
+      end: d.date,
+      eth: 0,
+    };
+    bar.eth += d.eth;
+    bar.end = d.date;
+    weeks.set(monday, bar);
+  }
+  return [...weeks.values()];
+}
+
+export const barHolds = (bar: ChartBar, date: string) => bar.date <= date && date <= bar.end;

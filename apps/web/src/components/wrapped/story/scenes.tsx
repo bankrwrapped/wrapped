@@ -6,8 +6,8 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useState, type ReactNode } from "react";
 import { getArchetype } from "@/lib/archetype";
 import { getBuilderType } from "@/lib/builder-type";
-import { claimRhythm, weekdayPlural } from "@/lib/claim-rhythm";
-import { dailySeries, daysSince, formatDate, formatUsd } from "@/lib/story-data";
+import { calendarBlocks, claimRhythm, weekdayPlural } from "@/lib/claim-rhythm";
+import { barHolds, chartBars, daysSince, formatDate, formatUsd } from "@/lib/story-data";
 import { summarizeThemes } from "@/lib/token-themes";
 import { topPlacings } from "@/hooks/use-ranks";
 import { BOARDS, CHAIN_LABEL, formatEth, proxiedImageUrl, type BoardResult, type WrappedProfile } from "@/lib/wrapped-data";
@@ -224,7 +224,9 @@ function EarningsScene({ p }: { p: WrappedProfile }) {
 
 function BestDayScene({ p }: { p: WrappedProfile }) {
   const reduce = useReducedMotion();
-  const series = dailySeries(p.dailyEarnings);
+  const best = p.claims.bestDay!;
+  // Daily bars, or weekly ones over a full year, so a year still fits.
+  const series = chartBars(p.claims.days);
   const max = Math.max(...series.map((d) => d.eth), 0.0001);
   // Square-root heights: one huge day would otherwise flatten the rest.
   const height = (eth: number) => Math.max(eth > 0 ? 4 : 0.6, Math.sqrt(eth / max) * 100);
@@ -235,9 +237,9 @@ function BestDayScene({ p }: { p: WrappedProfile }) {
         <Words text="Your biggest day" />
       </p>
       {series.length > 1 && (
-        <div className="relative mt-8 flex h-40 items-end gap-[2px] sm:h-56" aria-hidden>
+        <div className={`relative mt-8 flex h-40 items-end sm:h-56 ${series.length > 60 ? "gap-px" : "gap-[2px]"}`} aria-hidden>
           {series.map((d, i) => {
-            const peak = d.date === p.bestDay!.date || d.eth === max;
+            const peak = barHolds(d, best.date);
             return (
               <motion.div
                 key={d.date}
@@ -254,7 +256,7 @@ function BestDayScene({ p }: { p: WrappedProfile }) {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 2.2 }}
                   >
-                    {formatDate(d.date, { short: true }).replace(/, \d{4}$/, "")}
+                    {formatDate(best.date, { short: true }).replace(/, \d{4}$/, "")}
                   </motion.span>
                 )}
               </motion.div>
@@ -264,12 +266,12 @@ function BestDayScene({ p }: { p: WrappedProfile }) {
       )}
       <Slam delay={2.6}>
         <p className={`${big} text-[clamp(3.5rem,16vw,8rem)]`}>
-          {formatEth(p.bestDay!.eth).replace(" ETH", "")}
+          {formatEth(best.eth).replace(" ETH", "")}
           <span className="ml-3 text-[0.35em] text-white/70">ETH</span>
         </p>
       </Slam>
       <FadeUp delay={3.2}>
-        <p className={lead}>claimed on {formatDate(p.bestDay!.date)}.</p>
+        <p className={lead}>claimed on {formatDate(best.date)}.</p>
       </FadeUp>
     </Stage>
   );
@@ -373,34 +375,47 @@ function ThemesScene({ p }: { p: WrappedProfile }) {
 
 function RhythmScene({ p }: { p: WrappedProfile }) {
   const reduce = useReducedMotion();
-  const r = claimRhythm(p.dailyEarnings);
+  const r = claimRhythm(p.claims.days);
   const max = Math.max(...r.weeks.flat().map((c) => c?.eth ?? 0), 0.0001);
+  const streak = p.claims.longestStreakDays;
+  // Over half a year the calendar stacks as two halves, and cells size to
+  // the widest block; the reveal takes ~1.6s however many cells there are.
+  const blocks = calendarBlocks(r.weeks);
+  const cols = Math.max(...blocks.map((b) => b.length), 1);
+  const cellSize = cols > 14 ? `min(calc((100vw - 4rem) / ${cols} - 3px), 18px)` : "clamp(14px,4.4vw,26px)";
+  const step = 1.6 / Math.max(r.weeks.length * 7, 1);
   let n = 0;
   return (
     <Stage>
       <Eyebrow>When you claim</Eyebrow>
       <p className={lead}>
-        <Words text={`${r.claimDays} claim days in the last 90.`} />
+        <Words text={`${r.claimDays} claim days in ${p.claims.windowDays === 365 ? "the last year" : "the last 90"}.`} />
       </p>
-      <div className="my-4 flex justify-center gap-1" aria-hidden>
-        {r.weeks.map((week, w) => (
-          <div key={w} className="flex flex-col gap-1">
+      <div className="my-4 flex flex-col items-center gap-3" aria-hidden>
+        {blocks.map((weeks, b) => (
+        <div key={b} className="flex justify-center gap-[3px]">
+        {weeks.map((week, w) => (
+          <div key={w} className="flex flex-col gap-[3px]">
             {week.map((c, d) => {
               const i = n++;
               return (
                 <motion.span
                   key={d}
-                  className="size-[clamp(14px,4.4vw,26px)] rounded-[4px]"
+                  className="rounded-[3px]"
                   style={{
+                    width: cellSize,
+                    height: cellSize,
                     backgroundColor: !c ? "transparent" : c.eth > 0 ? "var(--accent)" : "rgba(255,255,255,0.08)",
                   }}
                   initial={{ opacity: 0, scale: reduce ? 1 : 0.2 }}
                   animate={{ opacity: c && c.eth > 0 ? 0.4 + 0.6 * (c.eth / max) : 1, scale: 1 }}
-                  transition={{ duration: 0.4, delay: 0.8 + i * 0.016, ease: EASE }}
+                  transition={{ duration: 0.4, delay: 0.8 + i * step, ease: EASE }}
                 />
               );
             })}
           </div>
+        ))}
+        </div>
         ))}
       </div>
       <Slam delay={2.8}>
@@ -408,11 +423,11 @@ function RhythmScene({ p }: { p: WrappedProfile }) {
           {weekdayPlural(r.busiestWeekday!)} are <span className="text-gradient">payday.</span>
         </p>
       </Slam>
-      {p.longestStreakDays > 1 && (
+      {streak > 1 && (
         <FadeUp delay={3.6}>
           <p className={lead}>
             Best run:{" "}
-            <CountUp value={p.longestStreakDays} format={(v) => String(Math.round(v))} delay={3.6} duration={900} className="text-accent" /> days in a row.
+            <CountUp value={streak} format={(v) => String(Math.round(v))} delay={3.6} duration={900} className="text-accent" /> days in a row.
           </p>
         </FadeUp>
       )}

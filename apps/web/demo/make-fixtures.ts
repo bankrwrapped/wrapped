@@ -68,6 +68,43 @@ if (dailyEarnings.at(-1)?.date !== iso(today)) dailyEarnings.push({ date: iso(to
 const big = dailyEarnings[Math.floor(dailyEarnings.length / 2)];
 big.eth = 0.8731;
 
+// The indexer's year of claims (payload.claimHistory): the 90 days above plus
+// the 275 before them, sparser (Mondays and Fridays), with the year's best day
+// in March. Its own generator, so the boards below stay the same.
+let yearSeed = 7;
+const yearRand = () => ((yearSeed = (yearSeed * 16807) % 2147483647) - 1) / 2147483646;
+const earlier: Array<{ date: string; eth: number }> = [];
+for (let i = 364; i >= 90; i--) {
+  const t = today - i * DAY;
+  const wd = new Date(t).getUTCDay();
+  if (!(((wd === 1 || wd === 5) && yearRand() < 0.7) || yearRand() < 0.06)) continue;
+  earlier.push({ date: iso(t), eth: Math.round((0.01 + yearRand() * 0.12) * 10000) / 10000 });
+}
+const yearPeak = earlier[Math.floor(earlier.length * 0.4)];
+yearPeak.eth = 1.4216;
+const yearDays = [...earlier, ...dailyEarnings];
+const runOf = (dates: string[]) => {
+  let best = 0, run = 0, prev = 0;
+  for (const d of dates) {
+    const t = Date.parse(d + "T00:00:00Z");
+    run = t - prev === DAY ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = t;
+  }
+  return best;
+};
+const claimHistory = {
+  source: "indexer",
+  from: iso(today - 364 * DAY),
+  to: iso(today),
+  days: yearDays,
+  claimDays: yearDays.length,
+  bestDay: { date: yearPeak.date, eth: yearPeak.eth },
+  longestStreakDays: runOf(yearDays.map((d) => d.date)),
+  totalEth: Math.round(yearDays.reduce((a, d) => a + d.eth, 0) * 10000) / 10000,
+  partial: false,
+};
+
 const creatorEarningsEth = 6.482;
 const pleaseBroEarningsEth = 0.630;
 const ETH_USD = 3400;
@@ -88,6 +125,7 @@ const payload = {
   dailyEarnings,
   claimCount: dailyEarnings.length + 6,
   longestStreakDays: 9,
+  claimHistory,
   summary: {
     tokensLaunched: launched.length,
     hasActivity: true,

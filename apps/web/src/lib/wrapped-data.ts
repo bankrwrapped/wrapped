@@ -50,10 +50,14 @@ export type WrappedProfile = {
   tradingVolume: Pick<WrappedTradingVolume, "totalVolumeUsd" | "isComplete"> & {
     status: WrappedTradingVolume["status"] | "none" | "unavailable";
   };
+  // Bankr's 90-day claim fields, as the leaderboards rank them.
   bestDay: { date: string; eth: number } | null;
   dailyEarnings: { date: string; eth: number }[];
   claimCount: number;
   longestStreakDays: number;
+  // What the cards and story show about claims: the full year from the
+  // indexer when the API has it, else Bankr's 90 days. See claimsView.
+  claims: ClaimsView;
   rank: number;
   totalUsers: number;
   percentile: number;
@@ -114,6 +118,39 @@ function readTradingVolume(
   return { totalVolumeUsd: v.totalVolumeUsd ?? 0, status: "ok", isComplete: v.isComplete === true };
 }
 
+export type ClaimsView = {
+  days: { date: string; eth: number }[];
+  bestDay: { date: string; eth: number } | null;
+  longestStreakDays: number;
+  // 365 for the indexer's full year (every claim route), 90 for Bankr's
+  // Doppler-only window.
+  windowDays: 365 | 90;
+};
+
+export function claimsView(
+  payload: Pick<WrappedPayload, "claimHistory" | "dailyEarnings" | "bestDay" | "longestStreakDays">,
+): ClaimsView {
+  const h = payload.claimHistory;
+  if (h) {
+    return {
+      days: h.days,
+      bestDay: h.bestDay,
+      longestStreakDays: h.longestStreakDays,
+      windowDays: 365,
+    };
+  }
+  return {
+    days: payload.dailyEarnings,
+    bestDay: payload.bestDay,
+    longestStreakDays: payload.longestStreakDays,
+    windowDays: 90,
+  };
+}
+
+// "the last year" / "90 days", for copy like "42 claim days in the last year".
+export const claimWindowLabel = (c: ClaimsView) =>
+  c.windowDays === 365 ? "the last year" : "90 days";
+
 export function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
   const { payload } = row;
   return {
@@ -140,6 +177,7 @@ export function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     dailyEarnings: payload.dailyEarnings,
     claimCount: payload.claimCount,
     longestStreakDays: payload.longestStreakDays,
+    claims: claimsView(payload),
     rank: row.rank,
     totalUsers: row.totalUsers,
     percentile: row.percentile,

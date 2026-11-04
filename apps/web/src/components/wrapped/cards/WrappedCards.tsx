@@ -5,13 +5,21 @@
 import type { ReactNode } from "react";
 import { getArchetype } from "@/lib/archetype";
 import { getBuilderType } from "@/lib/builder-type";
-import { claimRhythm, weekdayPlural, WEEKDAYS } from "@/lib/claim-rhythm";
-import { dailySeries, daysSince, formatDate, formatUsd } from "@/lib/story-data";
+import { calendarBlocks, claimRhythm, weekdayPlural, WEEKDAYS } from "@/lib/claim-rhythm";
+import {
+  barHolds,
+  chartBars,
+  dailySeries,
+  daysSince,
+  formatDate,
+  formatUsd,
+} from "@/lib/story-data";
 import { summarizeThemes } from "@/lib/token-themes";
 import { topPlacings } from "@/hooks/use-ranks";
 import {
   BOARDS,
   CHAIN_LABEL,
+  claimWindowLabel,
   formatBoardScore,
   formatEth,
   proxiedImageUrl,
@@ -82,7 +90,7 @@ export const CARDS: CardDef[] = [
     shareText: ({ profile: p }) =>
       `I've earned ${atLeast(p)}${formatEth(p.totalEth)} in launch fees on Bankr.`,
     Body: ({ profile: p }) => {
-      const series = dailySeries(p.dailyEarnings);
+      const series = dailySeries(p.claims.days);
       let run = 0;
       const cumulative = series.map((d) => (run += d.eth));
       const max = run || 1;
@@ -95,7 +103,9 @@ export const CARDS: CardDef[] = [
           {cumulative.length > 1 && (
             <div className="mb-auto mt-4">
               <p className="mb-1 text-right font-mono text-[9px] text-white/50">
-                claimed, last {series.length} days
+                {p.claims.windowDays === 365
+                  ? "claimed, last 12 months"
+                  : `claimed, last ${series.length} days`}
               </p>
               <svg viewBox="0 0 304 72" className="h-[72px] w-full" aria-hidden>
                 <defs>
@@ -140,11 +150,13 @@ export const CARDS: CardDef[] = [
     id: "best-day",
     eyebrow: "Your highlight",
     tone: "magenta",
-    available: ({ profile: p }) => !!p.bestDay && p.bestDay.eth > 0,
+    available: ({ profile: p }) => !!p.claims.bestDay && p.claims.bestDay.eth > 0,
     shareText: ({ profile: p }) =>
-      `Best day on Bankr: ${formatEth(p.bestDay!.eth)} claimed on ${formatDate(p.bestDay!.date)}.`,
+      `Best day on Bankr: ${formatEth(p.claims.bestDay!.eth)} claimed on ${formatDate(p.claims.bestDay!.date)}.`,
     Body: ({ profile: p }) => {
-      const series = dailySeries(p.dailyEarnings);
+      const best = p.claims.bestDay!;
+      // Daily bars, or weekly ones over a full year.
+      const series = chartBars(p.claims.days);
       const max = Math.max(...series.map((d) => d.eth), 0.0001);
       const w = 304 / Math.max(series.length, 1);
       return (
@@ -152,7 +164,7 @@ export const CARDS: CardDef[] = [
           {series.length > 1 && (
             <svg viewBox="0 0 304 110" className="mb-auto mt-4 h-[110px] w-full" aria-hidden>
               {series.map((d, i) => {
-                const peak = d.date === p.bestDay!.date || d.eth === max;
+                const peak = barHolds(d, best.date);
                 // Square-root heights so one huge day doesn't flatten the rest.
                 const h = Math.max(d.eth > 0 ? 3 : 1, Math.sqrt(d.eth / max) * 104);
                 return (
@@ -170,11 +182,9 @@ export const CARDS: CardDef[] = [
             </svg>
           )}
           <p className={label}>Best claim day</p>
-          <p className={`${hero} mt-2 text-[64px]`}>
-            {formatEth(p.bestDay!.eth).replace(" ETH", "")}
-          </p>
+          <p className={`${hero} mt-2 text-[64px]`}>{formatEth(best.eth).replace(" ETH", "")}</p>
           <p className="mt-2 font-display text-xl">ETH in one day</p>
-          <p className="mt-3 font-mono text-xs text-white/70">{formatDate(p.bestDay!.date)}</p>
+          <p className="mt-3 font-mono text-xs text-white/70">{formatDate(best.date)}</p>
         </>
       );
     },
@@ -296,42 +306,47 @@ export const CARDS: CardDef[] = [
     id: "rhythm",
     eyebrow: "When you claim",
     tone: "ember",
-    available: ({ profile: p }) => claimRhythm(p.dailyEarnings).claimDays >= 3,
+    available: ({ profile: p }) => claimRhythm(p.claims.days).claimDays >= 3,
     shareText: ({ profile: p }) => {
-      const r = claimRhythm(p.dailyEarnings);
-      return `${r.claimDays} claim days in 90 on Bankr${p.longestStreakDays > 1 ? `, ${p.longestStreakDays} in a row at best` : ""}. ${weekdayPlural(r.busiestWeekday!)} are payday.`;
+      const r = claimRhythm(p.claims.days);
+      const streak = p.claims.longestStreakDays;
+      return `${r.claimDays} claim days in ${claimWindowLabel(p.claims)} on Bankr${streak > 1 ? `, ${streak} in a row at best` : ""}. ${weekdayPlural(r.busiestWeekday!)} are payday.`;
     },
     Body: ({ profile: p }) => {
-      const r = claimRhythm(p.dailyEarnings);
+      const r = claimRhythm(p.claims.days);
       const max = Math.max(...r.weeks.flat().map((c) => c?.eth ?? 0), 0.0001);
-      // Cells shrink to fit however many weeks the series spans.
-      const cell = Math.min(
-        17,
-        Math.floor((304 - (r.weeks.length - 1) * 3) / Math.max(r.weeks.length, 1)),
-      );
+      // Over half a year the calendar stacks as two halves; cells shrink to
+      // fit the widest block.
+      const blocks = calendarBlocks(r.weeks);
+      const cols = Math.max(...blocks.map((b) => b.length), 1);
+      const cell = Math.min(17, Math.floor((304 - (cols - 1) * 3) / cols));
       return (
         <>
           <h2 className={`${hero} mt-3 text-[38px]`}>
             {weekdayPlural(r.busiestWeekday!)} are payday
           </h2>
-          <div className="my-auto flex justify-center gap-[3px] py-4" aria-hidden>
-            {r.weeks.map((week, w) => (
-              <div key={w} className="flex flex-col gap-[3px]">
-                {week.map((c, d) => (
-                  <span
-                    key={d}
-                    className="rounded-[3px]"
-                    style={{
-                      width: cell,
-                      height: cell,
-                      backgroundColor: !c
-                        ? "transparent"
-                        : c.eth > 0
-                          ? "var(--accent)"
-                          : "rgba(255,255,255,0.08)",
-                      opacity: c && c.eth > 0 ? 0.4 + 0.6 * (c.eth / max) : 1,
-                    }}
-                  />
+          <div className="my-auto flex flex-col items-center gap-3 py-4" aria-hidden>
+            {blocks.map((weeks, b) => (
+              <div key={b} className="flex justify-center gap-[3px]">
+                {weeks.map((week, w) => (
+                  <div key={w} className="flex flex-col gap-[3px]">
+                    {week.map((c, d) => (
+                      <span
+                        key={d}
+                        className="rounded-[3px]"
+                        style={{
+                          width: cell,
+                          height: cell,
+                          backgroundColor: !c
+                            ? "transparent"
+                            : c.eth > 0
+                              ? "var(--accent)"
+                              : "rgba(255,255,255,0.08)",
+                          opacity: c && c.eth > 0 ? 0.4 + 0.6 * (c.eth / max) : 1,
+                        }}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
@@ -344,7 +359,7 @@ export const CARDS: CardDef[] = [
             <div>
               <p className={label}>Best streak</p>
               <p className="mt-1 font-display text-2xl tabular-nums">
-                {p.longestStreakDays}
+                {p.claims.longestStreakDays}
                 <span className="text-sm text-white/60"> days</span>
               </p>
             </div>

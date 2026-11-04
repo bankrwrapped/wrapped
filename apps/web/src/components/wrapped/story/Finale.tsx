@@ -71,8 +71,8 @@ export function Finale({
           label: "Trading volume",
           text: v.status === "pending" ? "Counting…" : v.status === "ok" ? "$0" : "—",
         },
-    p.bestDay
-      ? { label: "Best day, ETH", value: p.bestDay.eth, format: (n: number) => n.toFixed(3) }
+    p.claims.bestDay
+      ? { label: "Best day, ETH", value: p.claims.bestDay.eth, format: (n: number) => n.toFixed(3) }
       : {
           label: "Please Bro tokens",
           value: p.pleaseBro.length,
