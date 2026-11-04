@@ -133,6 +133,22 @@ export interface WrappedTradingVolume {
   methodVersion?: number;
 }
 
+// One wallet's fee claims per UTC day over the last 365 days (from..to,
+// inclusive), every claim route included, valued in ETH when paid. `days`
+// holds only days with a claim. `partial`: some claims couldn't be valued
+// and count as 0.
+export interface ClaimHistory {
+  source: "indexer";
+  from: string;
+  to: string;
+  days: { date: string; eth: number }[];
+  claimDays: number;
+  bestDay: { date: string; eth: number } | null;
+  longestStreakDays: number;
+  totalEth: number;
+  partial: boolean;
+}
+
 export interface WrappedPayload {
   user: WrappedUser;
   tokens: WrappedTokenEntry[];
@@ -153,6 +169,11 @@ export interface WrappedPayload {
   dailyEarnings: { date: string; eth: number }[];
   claimCount: number;
   longestStreakDays: number;
+  // The full year of claims from the indexer (see the API's claimHistory.ts).
+  // Absent until the Base indexer has caught up, or when it's unavailable:
+  // then the cards use the 90-day fields above. The leaderboards always use
+  // the 90-day fields, so every wallet is ranked on the same data.
+  claimHistory?: ClaimHistory;
   summary: {
     tokensLaunched: number;
     hasActivity: boolean;

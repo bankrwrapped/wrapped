@@ -359,6 +359,69 @@ export interface ClankerV31ClaimRow {
   timestamp: string;
 }
 
+// Fees CLAIMED by a wallet - the money actually landing in it - for the
+// claim calendar (services/claimHistory.ts). Unlike the earned-fee query
+// above, Clanker v4 counts at claim (ClaimTokens*), not accrual. Base only:
+// the other columns this needs (tokenAddress1) exist only on that indexer.
+export const CLAIM_EVENT_TYPES = [
+  "Release",
+  "ClaimTokens",
+  "ClaimTokensPermissioned",
+  "ClankerV31ClaimedRewards",
+] as const;
+
+export interface ClaimEventRow {
+  poolId: string | null;
+  tokenAddress: string;
+  tokenAddress1: string | null;
+  eventType: (typeof CLAIM_EVENT_TYPES)[number];
+  amountToken0: string | null;
+  amountToken1: string | null;
+  blockNumber: string;
+  logIndex: number;
+  txHash: string;
+  timestamp: string;
+}
+
+export async function fetchClaimEventsPage(
+  chain: string,
+  recipient: string,
+  sinceIso: string,
+  after: EventCursor,
+  limit: number = PAGE_SIZE,
+): Promise<ClaimEventRow[]> {
+  if (!CHAINS_WITH_LAUNCHED_TOKEN.has(chain)) return [];
+  const query = `
+    query ClaimEvents($chain: String!, $recipient: String!, $since: timestamptz!, $fromBlock: numeric!, $fromLogIndex: Int!, $limit: Int!) {
+      ${FEE_EVENT_ROOT_FIELD}(
+        where: {
+          chain: { _eq: $chain }
+          recipient: { _eq: $recipient }
+          eventType: { _in: ${JSON.stringify(CLAIM_EVENT_TYPES)} }
+          timestamp: { _gte: $since }
+          _or: [
+            { blockNumber: { _gt: $fromBlock } }
+            { blockNumber: { _eq: $fromBlock }, logIndex: { _gt: $fromLogIndex } }
+          ]
+        }
+        order_by: [{ blockNumber: asc }, { logIndex: asc }]
+        limit: $limit
+      ) {
+        poolId tokenAddress tokenAddress1 eventType amountToken0 amountToken1 blockNumber logIndex txHash timestamp
+      }
+    }
+  `;
+  const data = await envioQuery<Record<string, ClaimEventRow[]>>(chain, query, {
+    chain,
+    recipient: recipient.toLowerCase(),
+    since: sinceIso,
+    fromBlock: after.blockNumber,
+    fromLogIndex: after.logIndex,
+    limit,
+  });
+  return data[FEE_EVENT_ROOT_FIELD];
+}
+
 export async function fetchClankerV31ClaimsPage(
   chain: string,
   recipient: string,

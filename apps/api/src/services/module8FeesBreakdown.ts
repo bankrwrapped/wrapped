@@ -103,7 +103,7 @@ function launchedTokenOf(event: IndexedFeeEventRow): string | null {
 // with an ETH numeraire pay that side of their fees in it.
 const NATIVE_ETH_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-function isEthLike(chain: Chain, tokenAddress: string): boolean {
+export function isEthLike(chain: Chain, tokenAddress: string): boolean {
   const addr = tokenAddress.toLowerCase();
   return addr === NATIVE_ETH_ADDRESS || addr === WETH_ADDRESS[chain].toLowerCase();
 }

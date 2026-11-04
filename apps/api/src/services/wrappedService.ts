@@ -6,6 +6,7 @@ import type {
   WrappedPayload,
   WrappedCacheRow,
   WrappedTokenEntry,
+  ClaimHistory,
 } from "@bankr-wrapped/shared";
 import { wrappedCacheRepository, type PersistedWrappedRow } from "../repositories/wrappedCacheRepository";
 import { bankrRateLimiter } from "../utils/bankrRateLimiter";
@@ -23,6 +24,7 @@ import {
 } from "./bankrFeeValuation";
 import { getClankerLedger, type ClankerLedger } from "./clankerLedger";
 import { getClankerV31 } from "./clankerV31";
+import { getClaimHistory } from "./claimHistory";
 
 const BANKR_API_BASE = "https://api.bankr.bot";
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
@@ -608,6 +610,39 @@ async function bankrTokenScope(
 }
 
 const CLAIMABLE_PRICING_TIMEOUT_MS = 10_000;
+const CLAIM_HISTORY_TIMEOUT_MS = 20_000;
+
+// The year of claims from the indexer (claimHistory.ts), scoped to the same
+// Bankr launches as the earnings. Undefined - the cards then use Bankr's 90
+// days - when Bankr's token lists failed (no scope), the indexer isn't
+// caught up, or it takes too long.
+async function fetchClaimHistory(
+  wallet: string,
+  creator: { data: CreatorFeesResponse; status: "ok" | "unavailable" },
+  beneficiary: { data: BeneficiaryFeesResponse; status: "ok" | "unavailable" }
+): Promise<ClaimHistory | undefined> {
+  if (!bothFeesOkFor(creator, beneficiary)) return undefined;
+  const tokens = [...creator.data.tokens, ...beneficiary.data.tokens];
+  const scope = {
+    bankrTokens: new Set(tokens.map((t) => bankrTokenKey(t.chain, t.tokenAddress))),
+    hasClankerV4: tokens.some((t) => t.source === "clanker"),
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const history = await Promise.race([
+      getClaimHistory(wallet, scope),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn("[wrappedService] claim history timed out, using Bankr's 90 days");
+          resolve(null);
+        }, CLAIM_HISTORY_TIMEOUT_MS);
+      }),
+    ]);
+    return history ?? undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // The indexer sees Doppler fees only when they're paid out (Release), so on
 // its own it misses everything unclaimed - jessepollak read 0.00 ETH against
@@ -690,12 +725,13 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
   const toUsd = (weth: number) => weth * ethUsd;
 
   const learned = learnQuoteAddresses(creator.tokens);
-  const [creatorLegs, pleaseBroLegs, clanker, v31] = await Promise.all([
+  const [creatorLegs, pleaseBroLegs, clanker, v31, claimHistory] = await Promise.all([
     valueQuoteLegs(creator.tokens, learned, ethUsd),
     valueQuoteLegs(beneficiary.tokens, learned, ethUsd),
     fetchClankerFees(match.evmAddress, [...creator.tokens, ...beneficiary.tokens], ethUsd),
     // Bankr's Clanker v3.1 launches, which Bankr's API omits (see clankerV31.ts).
     getClankerV31(match.evmAddress, ethUsd),
+    fetchClaimHistory(match.evmAddress, creatorResult, beneficiaryResult),
   ]);
 
   // Clanker is verified when the wallet's ledger reconciles with the chain
@@ -880,6 +916,7 @@ async function fetchFromBankr(match: BankrUserSearchResult): Promise<WrappedPayl
     dailyEarnings,
     claimCount,
     longestStreakDays,
+    ...(claimHistory ? { claimHistory } : {}),
     summary: { tokensLaunched: tokens.length, hasActivity, ...(v31.firstLaunch ? { firstLaunch: v31.firstLaunch } : {}) },
     meta: {
       creatorFeesStatus: creatorResult.status,
@@ -914,6 +951,12 @@ export function mergeWithCache(
 
   if (previous.tradingVolume) {
     merged.tradingVolume = previous.tradingVolume;
+  }
+
+  // A refresh that couldn't build the year of claims (indexer briefly down,
+  // timeout) keeps the last good one rather than dropping back to 90 days.
+  if (!fresh.claimHistory && previous.claimHistory) {
+    merged.claimHistory = previous.claimHistory;
   }
 
   if (fresh.meta.creatorFeesStatus === "unavailable" && previous.meta.creatorFeesStatus === "ok") {

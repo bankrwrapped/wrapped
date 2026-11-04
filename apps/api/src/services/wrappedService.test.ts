@@ -31,6 +31,12 @@ let clankerLedger: { claimableEth: number; claimableUnpriced: number; check: { r
 const noV31 = { tokens: [] as any[], byToken: {} as Record<string, number>, earnedEth: 0, claimableEth: 0, partial: false, firstLaunch: null as any };
 let v31 = noV31;
 mock.module("./clankerV31", () => ({ getClankerV31: async () => v31 }));
+// The year of claims (tested in claimHistory.test.ts).
+let claimHistory: any = null;
+let claimScope: any = null;
+mock.module("./claimHistory", () => ({
+  getClaimHistory: async (_w: string, scope: any) => { claimScope = scope; return claimHistory; },
+}));
 mock.module("./clankerLedger", () => ({
   getClankerLedger: async () => { ledgerCalls += 1; return clankerLedger; },
 }));
@@ -90,6 +96,7 @@ beforeEach(() => {
   indexerBreakdown = breakdown(0.25);
   clankerLedger = { claimableEth: 0, claimableUnpriced: 0, check: null };
   v31 = noV31;
+  claimHistory = null; claimScope = null;
   creatorTokens = [entry({ claimable: { token0: "0.05", token1: "0" }, claimed: { token0: "0.05", token1: "0", count: 1 } })];
   beneficiaryTokens = [entry({ tokenAddress: "0xBBB", name: "B", symbol: "B", chain: "robinhood", token1Label: "B" })];
   creatorExtra = {};
@@ -349,4 +356,42 @@ test("a v3.1 token already in Bankr's list isn't listed twice; a partial v3.1 re
   expect(p.tokens.length).toBe(1);
   expect(p.meta.earningsPartial).toBe(true);
   expect(p.meta.earningsFromIndexerIncomplete).toBe(true);
+});
+
+// ---- the year of claims ----
+
+const year = {
+  source: "indexer", from: "2025-11-05", to: "2026-11-04",
+  days: [{ date: "2026-01-10", eth: 3 }], claimDays: 1, bestDay: { date: "2026-01-10", eth: 3 },
+  longestStreakDays: 1, totalEth: 3, partial: false,
+};
+
+test("the year of claims rides along without touching the leaderboard fields", async () => {
+  claimHistory = year;
+  const p = await wrappedService.fetchFromBankr(match);
+  expect(p.claimHistory).toEqual(year as any);
+  // scoped to the same Bankr launches as the earnings, both sides
+  expect([...claimScope.bankrTokens].sort()).toEqual(["base:0xaaa", "robinhood:0xbbb"]);
+  // the 90-day fields the leaderboards rank on stay Bankr's
+  expect(p.bestDay?.eth ?? 0).not.toBe(3);
+});
+
+test("no year of claims (indexer behind) leaves the field off; Bankr down skips it entirely", async () => {
+  const p = await wrappedService.fetchFromBankr(match);
+  expect("claimHistory" in p).toBe(false);
+
+  creatorStatus = 500;
+  claimHistory = year;
+  claimScope = null;
+  const degraded = await wrappedService.fetchFromBankr(match);
+  expect(degraded.claimHistory).toBeUndefined();
+  expect(claimScope).toBeNull(); // never queried without a Bankr scope
+});
+
+test("a refresh without the year of claims keeps the previous one", async () => {
+  claimHistory = year;
+  const previous = await wrappedService.fetchFromBankr(match);
+  claimHistory = null;
+  const fresh = await wrappedService.fetchFromBankr(match);
+  expect(mergeWithCache(fresh, previous).claimHistory).toEqual(year as any);
 });
