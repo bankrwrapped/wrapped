@@ -1,9 +1,8 @@
 // apps/web/src/components/wrapped/Landing.tsx
 // The complete redesigned landing, composed from section components.
 // Order (locked): Hero → Thesis → Leaderboard → Skill-install →
-// Sign-in/Generate/CA → big Footer. The command-stream background sits behind.
+// Sign-in/Generate/CA → big Footer.
 
-import { CommandStream } from "@/components/wrapped/commandstream/CommandStream";
 import { Backdrop } from "@/components/wrapped/terminal/Backdrop";
 import { LandingHeader } from "@/components/wrapped/landing/LandingHeader";
 import { LandingHero } from "@/components/wrapped/landing/LandingHero";
@@ -17,9 +16,8 @@ import { Reveal } from "@/components/wrapped/landing/Reveal";
 export function Landing() {
   return (
     <Backdrop>
-      <CommandStream />
       <LandingHeader />
-      <div style={{ maxWidth: "1180px", margin: "0 auto", padding: "0 40px" }}>
+      <div className="landing-wrap">
         <LandingHero />
         <LandingThesis />
         <LandingLeaderboard />

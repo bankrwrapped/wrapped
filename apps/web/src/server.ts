@@ -46,16 +46,14 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 // ---- First-party API proxy -------------------------------------------------
 // The API lives on Railway (*.up.railway.app), a different site from
-// bankrwrapped.com. Its session cookie was therefore a third-party cookie,
-// which Safari and every iOS browser block outright - signed-in users looked
-// signed out. Forwarding /api/* and /auth/* through this worker makes the
-// browser only ever talk to bankrwrapped.com, so the cookie is first-party
-// and works in every browser. The frontend calls these paths relatively
-// (see API_URL in lib/wrapped-data.ts).
+// bankrwrapped.com. Forwarding /api/* through this worker keeps the browser
+// talking to bankrwrapped.com only (no CORS, one origin, the real visitor IP
+// passed on for rate limits). The frontend calls these paths relatively (see
+// API_URL in lib/wrapped-data.ts).
 const DEFAULT_API_ORIGIN = "https://wrapped-production.up.railway.app";
 
 function isProxiedPath(pathname: string): boolean {
-  return pathname.startsWith("/api/") || pathname.startsWith("/auth/");
+  return pathname.startsWith("/api/");
 }
 
 function apiOrigin(env: unknown): string {
@@ -82,8 +80,7 @@ async function proxyToApi(request: Request, env: unknown): Promise<Response> {
     method: request.method,
     headers,
     body: hasBody ? request.body : undefined,
-    // Pass OAuth 302s (and their Set-Cookie headers) straight to the
-    // browser instead of following them here.
+    // Hand any redirect back to the browser rather than following it here.
     redirect: "manual",
   });
   return new Response(upstream.body, {

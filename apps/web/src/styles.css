@@ -58,13 +58,14 @@
 
 :root {
   --radius: 1rem;
-  --background: oklch(0.15 0.014 300);
-  --foreground: oklch(0.97 0.003 300);
-  --surface: oklch(0.19 0.014 300);
-  --card: oklch(0.19 0.014 300);
-  --card-foreground: oklch(0.97 0.003 300);
-  --popover: oklch(0.19 0.014 300);
-  --popover-foreground: oklch(0.97 0.003 300);
+  /* Graphite ramp: surfaces stay neutral, the cards carry the color. */
+  --background: #141415;
+  --foreground: #ededed;
+  --surface: #19191b;
+  --card: #19191b;
+  --card-foreground: #ededed;
+  --popover: #19191b;
+  --popover-foreground: #ededed;
 
   --primary: oklch(0.53 0.25 292);
   --primary-foreground: oklch(0.98 0.003 300);
@@ -75,18 +76,19 @@
   --accent-foreground: oklch(0.15 0.014 300);
   --accent-glow: oklch(0.74 0.17 45);
 
-  --secondary: oklch(0.24 0.02 295);
-  --secondary-foreground: oklch(0.97 0.003 300);
-  --muted: oklch(0.24 0.02 295);
-  --muted-foreground: oklch(0.71 0.018 295);
+  --secondary: #232325;
+  --secondary-foreground: #ededed;
+  --muted: #232325;
+  --muted-foreground: #a1a1a6;
   --destructive: oklch(0.62 0.21 25);
   --destructive-foreground: oklch(0.98 0.003 300);
 
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.6 0.22 292);
+  --ring: oklch(0.7 0.19 42);
 
-  --glass: oklch(1 0 0 / 4%);
+  /* Kept as names for existing markup: a raised graphite surface, no blur tint. */
+  --glass: #19191b;
   --glass-border: oklch(1 0 0 / 8%);
 
   --chain-base: oklch(0.58 0.2 262);
@@ -229,13 +231,9 @@
   animation: slide-out 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Text-shadow safety net for legibility against the liquid-glass photo
-   background - gradient scrims alone can't guarantee coverage everywhere,
-   since the photo has bright streaks that shift position across the
-   viewport. A subtle dark shadow directly on text guarantees contrast
-   regardless of what's behind it at any given point, rather than us
-   continuing to chase gradient-opacity tuning per page. */
-body {
+/* Text-shadow for legibility over the story's moving color fields. Scoped to
+   the story player; the rest of the site sits on flat graphite. */
+[aria-roledescription="story"] {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 8px rgba(0, 0, 0, 0.25);
 }
 
@@ -265,4 +263,91 @@ body {
 @keyframes terminal-cursor-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
 @media (prefers-reduced-motion: reduce) {
   [style*="terminal-cursor-blink"] { animation:none !important; opacity:1 !important; }
+}
+
+/* --- Landing chrome: shared interaction states --------------------------- */
+/* Every page runs edge to edge: content fills the window, with one shared
+   side margin that grows with the screen. */
+.landing-wrap,
+.page-pad {
+  width: 100%;
+  padding-left: clamp(20px, 4vw, 64px);
+  padding-right: clamp(20px, 4vw, 64px);
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-quiet,
+.bot-prompt {
+  transition:
+    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-primary:hover {
+  background-color: #ffffff !important;
+}
+.btn-secondary:hover,
+.bot-prompt:hover {
+  border-color: rgba(237, 237, 237, 0.2) !important;
+}
+.btn-quiet:hover {
+  color: #ededed !important;
+  background-color: #232325 !important;
+}
+.btn-primary:active,
+.btn-secondary:active,
+.bot-prompt:active {
+  transform: scale(0.98);
+}
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-quiet:focus-visible,
+.bot-prompt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The bot prompt's caret: a terminal waiting for input. */
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.bot-caret {
+  animation: caret-blink 1.1s steps(1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-caret {
+    animation: none;
+  }
+}
+
+/* Handle lookup field */
+.lookup-field {
+  transition: border-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lookup-field:focus-within {
+  border-color: rgba(237, 237, 237, 0.32) !important;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-primary:disabled:hover {
+  background-color: #ededed !important;
+}
+
+.foot-link {
+  transition: color 150ms ease;
+}
+.foot-link:hover,
+.foot-link:focus-visible {
+  color: #ededed !important;
 }

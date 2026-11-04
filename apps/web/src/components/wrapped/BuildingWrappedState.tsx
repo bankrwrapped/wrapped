@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Check, Loader2 } from "lucide-react";
 
 // Reframed from technical-log copy ("Resolving profile") toward anticipation
@@ -7,25 +7,25 @@ import { Check, Loader2 } from "lucide-react";
 // than a system status list.
 const STEPS = [
   "Scanning Base and Robinhood Chain",
-  "Counting every token you've touched",
-  "Tallying up your earnings",
-  "Wrapping your story",
+  "Counting every token launched",
+  "Tallying up the earnings",
+  "Wrapping the story",
 ];
 const STEP_INTERVAL_MS = 700;
 
 // Rotates under the steps while the real lookup is still running, so a slow
 // Bankr response reads as part of the bit instead of a hang.
 const QUIPS = [
-  "Counting your launches…",
+  "Counting launches…",
   "Reading the fee locker…",
   "Asking Clanker nicely…",
-  "Weighing your Please Bros…",
+  "Weighing the Please Bros…",
   "Tallying the claims…",
-  "Finding your best day…",
+  "Finding the best day…",
   "Checking the streaks…",
-  "Sniffing out your theme…",
-  "Picking your builder type…",
-  "Polishing your cards…",
+  "Sniffing out the theme…",
+  "Picking a builder type…",
+  "Polishing the cards…",
 ];
 const QUIP_INTERVAL_MS = 1800;
 
@@ -70,133 +70,78 @@ export function BuildingWrappedState({ apiDone, onDone, handle, avatarUrl }: Pro
   useEffect(() => {
     if (apiDone && activeStep >= lastStep && !doneRef.current) {
       doneRef.current = true;
-      // Closing flourish: a brief bright flash before handing off, rather
-      // than cutting straight to the next screen - echoes the anticipation
-      // beat used in SceneMilestones so this feels like it's building
-      // toward something, not just finishing a task.
+      // A short fade out, then hand off to the story's own title card.
       setFinishing(true);
-      const t = setTimeout(onDone, 550);
+      const t = setTimeout(onDone, 320);
       return () => clearTimeout(t);
     }
   }, [apiDone, activeStep, lastStep, onDone]);
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-5 text-center">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/85 via-background/70 to-background/90" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-accent/15" />
-
-      <div className="absolute left-5 top-5 z-20 flex items-center gap-2.5">
-        <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
-          <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
-        </div>
-        <span className="font-display text-sm font-bold tracking-tight">
-          Bankr <span className="text-gradient">Wrapped</span>
-        </span>
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#141415] px-5 text-[#ededed]">
+      <div className="absolute left-6 top-5 z-20 flex items-center gap-2">
+        <img src="/logo.png" alt="" className="size-7 rounded-md object-contain" />
+        <span className="text-base font-medium">Bankr Wrapped</span>
       </div>
 
-      <div className="relative z-10 w-full max-w-md space-y-8">
-        {/* Avatar anchor - the visual "this is about you" moment. Falls
-            back to an initial-letter badge if we don't have an avatar
-            (user typed and submitted without picking a suggestion). */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: "spring", stiffness: 140, damping: 14 }}
-          className="relative mx-auto size-20"
-        >
-          <div className="absolute inset-0 animate-glow-pulse rounded-full bg-primary/40 blur-xl" />
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-            className="absolute -inset-1.5 rounded-full"
-            style={{
-              background: "conic-gradient(from 0deg, transparent, var(--color-accent), transparent 40%)",
-            }}
-          />
-          <div className="glass relative flex size-20 items-center justify-center overflow-hidden rounded-full">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: finishing ? 0 : 1, y: 0 }}
+        transition={{ duration: finishing ? 0.3 : 0.4, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 w-full max-w-md"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#232325]">
             {avatarUrl ? (
               <img src={avatarUrl} alt="" className="size-full object-cover" />
             ) : (
-              <span className="font-display text-2xl font-extrabold text-muted-foreground">
+              <span className="font-display text-2xl text-[#a1a1a6]">
                 {cleanHandle.charAt(0).toUpperCase() || "?"}
               </span>
             )}
           </div>
-        </motion.div>
+          <div className="min-w-0">
+            <p className="font-mono text-xs text-[#85858b]">
+              Bankr Wrapped {new Date().getUTCFullYear()}
+            </p>
+            <h1 className="mt-1 truncate font-display text-[28px] font-normal leading-tight tracking-tight">
+              @{cleanHandle}
+            </h1>
+          </div>
+        </div>
 
-        <motion.h1
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", stiffness: 130, damping: 16, delay: 0.1 }}
-          className="font-display text-2xl font-extrabold sm:text-3xl"
-        >
-          Pulling up{" "}
-          <span className="text-gradient">@{cleanHandle || "your"}</span>&rsquo;s year on
-          Bankr&hellip;
-        </motion.h1>
-
-        <motion.ul
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", stiffness: 130, damping: 16, delay: 0.2 }}
-          className="glass divide-y divide-white/10 rounded-2xl p-1.5 text-left"
-        >
+        <ul className="mt-8 divide-y divide-white/[0.08] rounded-2xl border border-white/[0.08] bg-[#19191b] px-1 text-left">
           {STEPS.map((label, i) => {
             const isLast = i === lastStep;
             const checked = i < activeStep || (isLast && apiDone && activeStep >= lastStep);
             const active = i === activeStep && !checked;
             return (
-              <motion.li
-                key={label}
-                layout
-                animate={{
-                  scale: active ? 1.03 : 1,
-                  opacity: checked ? 0.55 : 1,
-                }}
-                transition={{ type: "spring", stiffness: 200, damping: 20 }}
-                className="flex items-center gap-3 rounded-xl px-4 py-3.5"
-              >
-                {checked ? (
-                  <Check className="size-4 shrink-0 text-accent" />
-                ) : active ? (
-                  <Loader2 className="size-4 shrink-0 animate-spin text-accent" />
-                ) : (
-                  <span className="size-4 shrink-0 rounded-full border border-white/15" />
-                )}
+              <li key={label} className="flex h-12 items-center gap-3 px-4 text-[15px]">
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  {checked ? (
+                    <Check className="size-4 text-[#a1a1a6]" strokeWidth={1.5} />
+                  ) : active ? (
+                    <Loader2 className="size-4 animate-spin text-accent" strokeWidth={1.5} />
+                  ) : (
+                    <span className="size-1.5 rounded-full bg-white/20" />
+                  )}
+                </span>
                 <span
                   className={
-                    active
-                      ? "font-semibold text-foreground"
-                      : checked
-                        ? "text-muted-foreground"
-                        : "text-muted-foreground/60"
+                    active ? "text-[#ededed]" : checked ? "text-[#a1a1a6]" : "text-[#85858b]"
                   }
                 >
                   {label}
                 </span>
-              </motion.li>
+              </li>
             );
           })}
-        </motion.ul>
+        </ul>
 
-        {!apiDone && activeStep >= lastStep && (
-          <p aria-live="polite" className="font-mono text-sm text-accent">
-            {QUIPS[quip]}
-          </p>
-        )}
-      </div>
-
-      {/* Closing flourish - one bright pulse right before handoff */}
-      <AnimatePresence>
-        {finishing && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.9, 0] }}
-            transition={{ duration: 0.55, times: [0, 0.35, 1] }}
-            className="pointer-events-none absolute inset-0 z-30 bg-accent/50"
-          />
-        )}
-      </AnimatePresence>
+        <p aria-live="polite" className="mt-4 h-5 font-mono text-xs text-[#85858b]">
+          {!apiDone && activeStep >= lastStep ? QUIPS[quip] : ""}
+        </p>
+      </motion.div>
     </main>
   );
 }

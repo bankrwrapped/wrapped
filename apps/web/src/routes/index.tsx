@@ -1,32 +1,39 @@
 // apps/web/src/routes/index.tsx
 //
-// Auth-first root route. On mount we ask the server who we are via useAuth
-// (GET /api/auth/me), then branch:
-//   checking    → minimal checking state
-//   signed-out  → Landing
-//   error       → Landing (handles its own auth-error affordance)
-//   no-account  → NoAccountState (signed in, no Bankr wallet resolved)
-//   signed-in   → fetch wrapped by handle, then the story and its cards
-//   (WrappedExperience)
+// Lookup-first root route. No sign-in: a Wrapped is public on-chain data, so
+// the handle lives in the URL (/?u=<handle>) and every Wrapped has a link.
+//   no ?u       → Landing (with the handle lookup)
+//   ?u=<handle> → fetch that Wrapped, then the story and its cards
+//                 (WrappedExperience); an unknown handle gets NotFound.
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
 import { BuildingWrappedState } from "@/components/wrapped/BuildingWrappedState";
-import { NoAccountState } from "@/components/wrapped/NoAccountState";
 import { WrappedExperience } from "@/components/wrapped/WrappedExperience";
 import { Landing } from "@/components/wrapped/Landing";
-import { useAuth } from "@/hooks/use-auth";
-import { lookupWrapped, type WrappedProfile } from "@/lib/wrapped-data";
+import { Lookup } from "@/components/wrapped/landing/Lookup";
+import {
+  lookupWrapped,
+  normalizeHandle,
+  WrappedNotFoundError,
+  type WrappedProfile,
+} from "@/lib/wrapped-data";
+
+type IndexSearch = { u?: string };
 
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>): IndexSearch => {
+    const u = typeof search.u === "string" ? normalizeHandle(search.u) : "";
+    return u ? { u } : {};
+  },
   head: () => ({
     meta: [
       { title: "Bankr Wrapped \u00B7 Your Launchpad Year" },
       {
         name: "description",
         content:
-          "A cinematic recap of your Bankr year: tokens launched, Please Bro tokens, earnings, and lifetime volume.",
+          "A cinematic recap of a Bankr year: tokens launched, Please Bro tokens, earnings, and lifetime volume. Look up any handle.",
       },
       { property: "og:title", content: "Bankr Wrapped" },
       { property: "og:type", content: "website" },
@@ -37,20 +44,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const auth = useAuth();
-
-  return (
-    <>
-      {auth.status === "checking" ? <Checking /> : null}
-      {auth.status === "signed-out" || auth.status === "error" ? <Landing /> : null}
-      {auth.status === "no-account" ? <NoAccountState onBack={reload} /> : null}
-      {auth.status === "signed-in" ? <SignedIn xUsername={auth.xUsername} /> : null}
-    </>
-  );
-}
-
-function reload() {
-  if (typeof window !== "undefined") window.location.assign("/");
+  const { u } = Route.useSearch();
+  // Keyed by handle so a new lookup starts from a clean state.
+  return u ? <WrappedFor key={u} handle={u} /> : <Landing />;
 }
 
 // Trading volume is computed in the background: re-ask while it's pending
@@ -58,13 +54,13 @@ function reload() {
 const VOLUME_POLL_MS = 30_000;
 const VOLUME_POLL_MAX = 20;
 
-// Signed-in branch: fetch the wrapped profile by handle (Option A — backend
-// resolves handle→wallet→data on the existing route), then show the cards.
-// Note: no-activity users are NOT gated out — they get the same deck with
-// honest small numbers (locked decision).
-function SignedIn({ xUsername }: { xUsername: string }) {
+// Fetch the Wrapped by handle (the backend resolves handle→wallet→data), then
+// show the story and cards. No-activity handles are NOT gated out — they get
+// the same deck with honest small numbers (locked decision).
+function WrappedFor({ handle: xUsername }: { handle: string }) {
   const [profile, setProfile] = useState<WrappedProfile | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ notFound: boolean; message: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [intro, setIntro] = useState(true);
   const endIntro = useCallback(() => setIntro(false), []);
 
@@ -77,17 +73,25 @@ function SignedIn({ xUsername }: { xUsername: string }) {
         if (!cancelled) setProfile(p);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Something went wrong");
+        if (cancelled) return;
+        setError({
+          notFound: e instanceof WrappedNotFoundError,
+          message: e instanceof Error ? e.message : "Something went wrong",
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [xUsername]);
+  }, [xUsername, attempt]);
 
   // Poll while volume is pending or still a floor. "none" never resolves (no
   // launches to count), so it isn't polled.
   const tv = profile?.tradingVolume;
-  const volumeSettled = !tv || tv.status === "none" || tv.status === "unavailable" || (tv.status === "ok" && tv.isComplete);
+  const volumeSettled =
+    !tv ||
+    tv.status === "none" ||
+    tv.status === "unavailable" ||
+    (tv.status === "ok" && tv.isComplete);
   useEffect(() => {
     if (volumeSettled) return;
     let polls = 0;
@@ -99,7 +103,7 @@ function SignedIn({ xUsername }: { xUsername: string }) {
         setProfile((p) =>
           p && p.tradingVolume.status === "pending"
             ? { ...p, tradingVolume: { ...p.tradingVolume, status: "unavailable" } }
-            : p
+            : p,
         );
         return;
       }
@@ -109,32 +113,63 @@ function SignedIn({ xUsername }: { xUsername: string }) {
     return () => clearInterval(t);
   }, [volumeSettled, xUsername]);
 
-  if (error) return <LoadError message={error} />;
+  if (error?.notFound) return <NotFound handle={xUsername} />;
+  if (error) return <LoadError message={error.message} onRetry={() => setAttempt((a) => a + 1)} />;
   if (intro || !profile) {
-    return <BuildingWrappedState apiDone={profile !== null} onDone={endIntro} handle={xUsername} avatarUrl={null} />;
+    return (
+      <BuildingWrappedState
+        apiDone={profile !== null}
+        onDone={endIntro}
+        handle={xUsername}
+        avatarUrl={null}
+      />
+    );
   }
 
   return <WrappedExperience profile={profile} />;
 }
 
-function Checking() {
+function NotFound({ handle }: { handle: string }) {
   return (
-    <div style={centered}>
-      <span style={checkingText}>{"> authenticating…"}</span>
-    </div>
+    <Centered>
+      <p style={meta}>No Wrapped for @{handle}</p>
+      <h1 style={title}>That handle doesn&rsquo;t have a Bankr wallet</h1>
+      <p style={body}>
+        Wrapped needs a Bankr account linked to the handle. Check the spelling, or look up someone
+        else.
+      </p>
+      <div style={{ marginTop: "32px", width: "100%" }}>
+        <Lookup autoFocus />
+      </div>
+      <Link to="/" style={back}>
+        Back to the start
+      </Link>
+    </Centered>
   );
 }
 
-function LoadError({ message }: { message: string }) {
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Centered>
+      <p style={meta}>Couldn&rsquo;t load this Wrapped</p>
+      <h1 style={title}>Something went wrong on our side</h1>
+      <p style={body}>{message}</p>
+      <div style={{ display: "flex", gap: "8px", marginTop: "32px" }}>
+        <button type="button" onClick={onRetry} className="btn-primary" style={primaryBtn}>
+          Try again
+        </button>
+        <Link to="/" className="btn-secondary" style={secondaryBtn}>
+          Look up someone else
+        </Link>
+      </div>
+    </Centered>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
   return (
     <div style={centered}>
-      <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "1rem" }}>
-        <span style={checkingText}>{"> couldn't load your wrapped"}</span>
-        <span style={{ ...checkingText, opacity: 0.6, fontSize: "0.8rem" }}>{message}</span>
-        <button type="button" onClick={reload} style={retryBtn}>
-          retry
-        </button>
-      </div>
+      <div style={{ width: "100%", maxWidth: "34rem" }}>{children}</div>
     </div>
   );
 }
@@ -144,24 +179,66 @@ const centered: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  backgroundColor: "var(--background, #0c0a09)",
+  padding: "24px 20px",
+  background: "#141415",
 };
 
-const checkingText: React.CSSProperties = {
-  fontFamily: "var(--font-mono, 'Departure Mono', ui-monospace, monospace)",
-  fontSize: "0.9rem",
-  color: "var(--muted-foreground, #8a83a0)",
-  letterSpacing: "0.05em",
+const meta: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: "12px",
+  lineHeight: "16px",
+  color: "#85858b",
+  margin: 0,
 };
 
-const retryBtn: React.CSSProperties = {
-  appearance: "none",
-  border: "1px solid var(--border, rgba(255,255,255,0.12))",
-  background: "transparent",
-  borderRadius: "0.5rem",
-  padding: "0.5rem 1.25rem",
-  fontFamily: "var(--font-mono, 'Departure Mono', ui-monospace, monospace)",
-  fontSize: "0.85rem",
-  color: "var(--foreground, #f7f4f0)",
+const title: React.CSSProperties = {
+  fontFamily: "var(--font-display)",
+  fontWeight: 400,
+  fontSize: "32px",
+  lineHeight: 1.15,
+  letterSpacing: "-0.02em",
+  color: "#ededed",
+  margin: "12px 0 0",
+};
+
+const body: React.CSSProperties = {
+  fontSize: "15px",
+  lineHeight: "24px",
+  color: "#a1a1a6",
+  margin: "12px 0 0",
+};
+
+const back: React.CSSProperties = {
+  display: "inline-block",
+  marginTop: "24px",
+  fontSize: "14px",
+  color: "#a1a1a6",
+  textDecoration: "underline",
+  textUnderlineOffset: "3px",
+};
+
+const primaryBtn: React.CSSProperties = {
+  height: "44px",
+  padding: "0 20px",
+  borderRadius: "10px",
+  border: "none",
+  background: "#ededed",
+  color: "#141415",
+  fontWeight: 500,
+  fontSize: "15px",
   cursor: "pointer",
+};
+
+const secondaryBtn: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  height: "44px",
+  padding: "0 20px",
+  borderRadius: "10px",
+  border: "1px solid rgba(237,237,237,0.14)",
+  background: "#232325",
+  color: "#ededed",
+  fontWeight: 500,
+  fontSize: "15px",
+  textDecoration: "none",
 };

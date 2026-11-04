@@ -1,14 +1,14 @@
 // apps/web/src/components/wrapped/landing/LandingSkill.tsx
 //
-// Skill-install section — second to last, before the footer (locked order).
-// Copyable skill link, the four install steps, and the two "ask for it"
-// paths (on X / in Bankr chat). Matches the approved mockup. Static content
-// — no per-user data here.
+// Skill-install section: copyable skill link, the four install steps, and the
+// two "ask for it" paths (on X / in Bankr chat) as bot prompts. Static
+// content, no per-user data here.
 
 import { useState } from "react";
 
+import { BotPrompt } from "./BotPrompt";
 import { useIsMobile } from "./useMediaQuery";
-import { T, glass, eyebrow } from "./tokens";
+import { T, eyebrow, h2Style, panel, sectionStyle } from "./tokens";
 
 const SKILL_LINK = "https://github.com/bankrwrapped/wrapped/tree/main/skills/bankr-wrapped";
 
@@ -34,7 +34,7 @@ function renderStep(step: string) {
         href="https://bankr.bot"
         target="_blank"
         rel="noopener noreferrer"
-        style={{ color: "inherit", textDecoration: "underline" }}
+        style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: "3px" }}
       >
         bankr.bot
       </a>
@@ -48,15 +48,20 @@ export function LandingSkill() {
   const [copied, setCopied] = useState(false);
 
   return (
-    <section style={block}>
-      <div style={{ ...eyebrow, color: T.violetBright }}>builder · install once</div>
-      <h2 style={h2}>Set up the Bankr Wrapped skill.</h2>
+    <section style={sectionStyle(mobile)}>
+      <div style={eyebrow}>For builders, install once</div>
+      <h2 style={h2Style(mobile)}>Set up the Bankr Wrapped skill</h2>
 
-      <div style={{ ...grid, gridTemplateColumns: mobile ? "1fr" : "1.2fr 0.8fr" }}>
+      <div
+        style={{
+          ...grid,
+          gridTemplateColumns: mobile ? "minmax(0, 1fr)" : "minmax(0, 1.2fr) minmax(0, 0.8fr)",
+        }}
+      >
         <div>
-          <div style={{ ...glass, padding: "22px 24px" }}>
-            <div style={{ ...caLbl, marginBottom: "10px" }}>Skill link</div>
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ ...panel, padding: "20px 24px" }}>
+            <div style={label}>Skill link</div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
               <div style={linkField}>{SKILL_LINK}</div>
               <button
                 type="button"
@@ -65,6 +70,7 @@ export function LandingSkill() {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1600);
                 }}
+                className="btn-secondary"
                 style={copyBtn}
               >
                 {copied ? "Copied" : "Copy"}
@@ -72,72 +78,53 @@ export function LandingSkill() {
             </div>
           </div>
 
-          <div style={{ ...steps, gridTemplateColumns: mobile ? "1fr" : "1fr 1fr" }}>
+          <ol style={{ ...steps, gridTemplateColumns: mobile ? "1fr" : "1fr 1fr" }}>
             {STEPS.map((s, i) => (
-              <div key={i} style={{ ...glass, padding: "16px" }}>
-                <div style={stepN}>{String(i + 1).padStart(2, "0")}</div>
+              <li key={s} style={{ ...panel, padding: "16px 20px" }}>
+                <div style={stepN}>{i + 1}</div>
                 <p style={stepP}>{renderStep(s)}</p>
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
         </div>
 
         <div>
-          <div style={{ ...caLbl, marginBottom: "12px" }}>Then ask, either way</div>
-          {PATHS.map((p) => (
-            <div key={p.where} style={{ ...glass, padding: "16px", marginBottom: "12px" }}>
-              <div style={pathWhere}>{p.where}</div>
-              <code style={pathCode}>{p.cmd}</code>
-            </div>
-          ))}
+          <div style={label}>Then ask, either way</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px" }}>
+            {PATHS.map((p) => (
+              <div key={p.where}>
+                <div style={pathWhere}>{p.where}</div>
+                <BotPrompt command={p.cmd} />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-const block: React.CSSProperties = {
-  padding: "120px 0",
-  position: "relative",
-  zIndex: 2,
-  maxWidth: "1180px",
-  margin: "0 auto",
-};
+const grid: React.CSSProperties = { display: "grid", gap: "24px", marginTop: "40px" };
 
-const h2: React.CSSProperties = {
-  fontFamily: T.fontDisplay,
-  fontWeight: 700,
-  fontSize: "clamp(30px, 4.5vw, 52px)",
-  letterSpacing: "-0.03em",
-  lineHeight: 1,
-  margin: "16px 0 22px",
-  color: T.text,
-};
-
-const grid: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1.2fr 0.8fr",
-  gap: "24px",
-  marginTop: "40px",
-};
-
-const caLbl: React.CSSProperties = {
+const label: React.CSSProperties = {
   fontFamily: T.fontMono,
-  fontSize: "10px",
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
+  fontSize: "12px",
+  lineHeight: "16px",
   color: T.textFaint,
 };
 
 const linkField: React.CSSProperties = {
   flex: 1,
-  minWidth: "220px",
-  padding: "12px 15px",
+  minWidth: 0,
+  height: "40px",
+  padding: "0 12px",
+  display: "flex",
+  alignItems: "center",
   borderRadius: "10px",
   border: `1px solid ${T.border}`,
-  background: "rgba(0,0,0,0.3)",
+  background: T.deep,
   fontFamily: T.fontMono,
-  fontSize: "12.5px",
+  fontSize: "13px",
   color: T.text,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -145,50 +132,45 @@ const linkField: React.CSSProperties = {
 };
 
 const copyBtn: React.CSSProperties = {
-  padding: "12px 18px",
+  height: "40px",
+  padding: "0 16px",
   borderRadius: "10px",
   border: `1px solid ${T.borderStrong}`,
-  fontFamily: T.fontMono,
-  fontSize: "10px",
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  color: T.violetBright,
-  background: "transparent",
+  fontFamily: T.fontBody,
+  fontWeight: 500,
+  fontSize: "14px",
+  color: T.text,
+  background: T.raised,
   cursor: "pointer",
+  flex: "none",
 };
 
 const steps: React.CSSProperties = {
+  listStyle: "none",
+  padding: 0,
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
   gap: "12px",
-  marginTop: "16px",
+  margin: "12px 0 0",
 };
 
-const stepN: React.CSSProperties = { fontFamily: T.fontMono, fontSize: "10px", color: T.violet };
+const stepN: React.CSSProperties = {
+  fontFamily: T.fontMono,
+  fontSize: "12px",
+  lineHeight: "16px",
+  color: T.textFaint,
+};
 const stepP: React.CSSProperties = {
   fontFamily: T.fontBody,
-  marginTop: "8px",
-  fontSize: "14px",
+  margin: "8px 0 0",
+  fontSize: "15px",
   color: T.text,
-  lineHeight: 1.4,
+  lineHeight: "22px",
 };
 
 const pathWhere: React.CSSProperties = {
-  fontFamily: T.fontMono,
-  fontSize: "9.5px",
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  color: T.orangeBright,
-};
-
-const pathCode: React.CSSProperties = {
-  display: "block",
-  marginTop: "9px",
-  padding: "11px",
-  borderRadius: "8px",
-  background: "rgba(0,0,0,0.3)",
-  border: `1px solid ${T.border}`,
-  fontFamily: T.fontMono,
-  fontSize: "11.5px",
-  color: T.text,
+  fontFamily: T.fontBody,
+  fontSize: "13px",
+  lineHeight: "20px",
+  color: T.textDim,
+  marginBottom: "8px",
 };

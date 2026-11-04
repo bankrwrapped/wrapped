@@ -77,10 +77,6 @@ type ApiWrappedCacheRow = WrappedCacheRow;
 // (e.g. pointing a dev build straight at a local API).
 export const API_URL = import.meta.env.VITE_API_URL ?? "";
 
-// Starts X OAuth (apps/api authController.startXLogin). Must go through the
-// same origin as API_URL so the PKCE + session cookies land first-party.
-export const X_LOGIN_URL = `${API_URL}/auth/x/login`;
-
 function upscaleAvatar(url: string): string {
   if (url.includes("pbs.twimg.com") && url.includes("_normal.")) {
     return url.replace("_normal.", "_400x400.");
@@ -98,7 +94,10 @@ function upscaleAvatar(url: string): string {
 // (buildVolumeTokenRefs); without one, a "pending" result never resolves.
 const VOLUME_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
 
-function readTradingVolume(raw: unknown, tokens: WrappedTokenEntry[]): WrappedProfile["tradingVolume"] {
+function readTradingVolume(
+  raw: unknown,
+  tokens: WrappedTokenEntry[],
+): WrappedProfile["tradingVolume"] {
   let tv = raw;
   if (typeof tv === "string") {
     try {
@@ -148,6 +147,9 @@ export function mapToProfile(row: ApiWrappedCacheRow): WrappedProfile {
     beneficiaryFeesStatus: payload.meta.beneficiaryFeesStatus,
   };
 }
+
+// "@Name " → "name": how handles appear in URLs and lookups.
+export const normalizeHandle = (raw: string) => raw.trim().replace(/^@+/, "").toLowerCase();
 
 export async function lookupWrapped(rawHandle: string): Promise<WrappedProfile> {
   const handle = rawHandle.trim().replace(/^@/, "").toLowerCase();
@@ -252,7 +254,9 @@ export { BOARDS } from "@bankr-wrapped/shared";
 
 // Category boards. `month` ("YYYY-MM") picks the current or previous edition
 // of the monthly board; `handle` adds that handle's row and neighbors.
-export async function fetchLeaderboards(opts: { month?: string; handle?: string } = {}): Promise<LeaderboardsResponse> {
+export async function fetchLeaderboards(
+  opts: { month?: string; handle?: string } = {},
+): Promise<LeaderboardsResponse> {
   const params = new URLSearchParams();
   if (opts.month) params.set("month", opts.month);
   if (opts.handle) params.set("handle", opts.handle.replace(/^@/, ""));
@@ -263,7 +267,8 @@ export async function fetchLeaderboards(opts: { month?: string; handle?: string 
     throw new Error(body?.error ?? `Request failed with status ${res.status}`);
   }
   const data: LeaderboardsResponse = await res.json();
-  const upscale = (e: BoardEntry | null) => (e ? { ...e, avatarUrl: upscaleAvatar(e.avatarUrl) } : null);
+  const upscale = (e: BoardEntry | null) =>
+    e ? { ...e, avatarUrl: upscaleAvatar(e.avatarUrl) } : null;
   return {
     ...data,
     boards: data.boards.map((b) => ({

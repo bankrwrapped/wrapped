@@ -15,14 +15,14 @@ const SITE_URL = "https://bankrwrapped.com";
 
 export type Tone = "violet" | "ember" | "magenta" | "gold" | "indigo";
 
-// Two light sources per tone, set at different corners so neighbouring cards
-// in the wall don't repeat.
+// One light per tone, each from its own corner, so every card reads as its
+// own color and neighbouring cards in the wall don't repeat.
 const TONES: Record<Tone, string> = {
-  violet: `radial-gradient(120% 90% at 0% 0%, color-mix(in oklch, ${COLORS.violet} 70%, transparent), transparent 60%), radial-gradient(90% 70% at 100% 100%, color-mix(in oklch, ${COLORS.ember} 35%, transparent), transparent 65%)`,
-  ember: `radial-gradient(110% 90% at 100% 0%, color-mix(in oklch, ${COLORS.ember} 65%, transparent), transparent 60%), radial-gradient(90% 70% at 0% 100%, color-mix(in oklch, ${COLORS.violet} 45%, transparent), transparent 65%)`,
-  magenta: `radial-gradient(120% 80% at 50% 0%, color-mix(in oklch, ${COLORS.magenta} 60%, transparent), transparent 62%), radial-gradient(80% 60% at 100% 100%, color-mix(in oklch, ${COLORS.indigo} 55%, transparent), transparent 65%)`,
-  gold: `radial-gradient(110% 85% at 0% 100%, color-mix(in oklch, ${COLORS.gold} 55%, transparent), transparent 60%), radial-gradient(90% 70% at 100% 0%, color-mix(in oklch, ${COLORS.ember} 45%, transparent), transparent 62%)`,
-  indigo: `radial-gradient(120% 90% at 100% 100%, color-mix(in oklch, ${COLORS.indigo} 75%, transparent), transparent 60%), radial-gradient(80% 60% at 0% 0%, color-mix(in oklch, ${COLORS.magenta} 35%, transparent), transparent 62%)`,
+  violet: `radial-gradient(130% 95% at 0% 0%, color-mix(in oklch, ${COLORS.violet} 62%, transparent), transparent 64%)`,
+  ember: `radial-gradient(120% 95% at 100% 0%, color-mix(in oklch, ${COLORS.ember} 58%, transparent), transparent 64%)`,
+  magenta: `radial-gradient(130% 85% at 50% 0%, color-mix(in oklch, ${COLORS.magenta} 55%, transparent), transparent 66%)`,
+  gold: `radial-gradient(120% 90% at 0% 100%, color-mix(in oklch, ${COLORS.gold} 48%, transparent), transparent 64%)`,
+  indigo: `radial-gradient(130% 95% at 100% 100%, color-mix(in oklch, ${COLORS.indigo} 70%, transparent), transparent 64%)`,
 };
 
 export function CardFrame({
@@ -41,20 +41,18 @@ export function CardFrame({
   return (
     <div
       ref={ref}
-      className="relative flex flex-col overflow-hidden rounded-[28px] border border-white/12 p-7 text-white"
+      className="relative flex flex-col overflow-hidden rounded-[24px] border border-white/12 p-7 text-white"
       style={{ width: CARD_W, height: CARD_H, background: `${TONES[tone]}, #0d0b12` }}
     >
       <Grain opacity={0.12} />
-      <div className="relative flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.24em] text-white/60">
+      <div className="relative flex items-center justify-between font-mono text-[11px] text-white/65">
         <span>{eyebrow}</span>
         <span>{new Date().getUTCFullYear()}</span>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col justify-end">{children}</div>
-      <div className="relative mt-5 flex items-center justify-between border-t border-white/10 pt-3 font-mono text-[10px] text-white/55">
+      <div className="relative mt-5 flex items-center justify-between border-t border-white/10 pt-3 font-mono text-[11px] text-white/60">
         <span>@{handle}</span>
-        <span>
-          Bankr <span className="text-gradient">Wrapped</span>
-        </span>
+        <span>Bankr Wrapped</span>
       </div>
     </div>
   );
@@ -72,15 +70,31 @@ export function ScaledCard({ children, className }: { children: ReactNode; class
     return () => ro.disconnect();
   }, []);
   return (
-    <div ref={ref} className={`relative w-full ${className ?? ""}`} style={{ height: CARD_H * scale }}>
-      <div className="absolute left-0 top-0" style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: "top left" }}>
+    <div
+      ref={ref}
+      className={`relative w-full ${className ?? ""}`}
+      style={{ height: CARD_H * scale }}
+    >
+      <div
+        className="absolute left-0 top-0"
+        style={{
+          width: CARD_W,
+          height: CARD_H,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
         {children}
       </div>
     </div>
   );
 }
 
-type Status = { kind: "idle" } | { kind: "busy" } | { kind: "done"; label: string } | { kind: "error"; label: string };
+type Status =
+  | { kind: "idle" }
+  | { kind: "busy" }
+  | { kind: "done"; label: string }
+  | { kind: "error"; label: string };
 
 function renderCard(node: HTMLElement): Promise<Blob> {
   return toBlob(node, { pixelRatio: 3, cacheBust: true }).then((blob) => {
@@ -175,14 +189,16 @@ export function ShareActions({
   const post = () => {
     const text = `${shareText}\n\n${SITE_URL}`;
     const intent = `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
-    const phone = typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches;
+    const phone =
+      typeof navigator.canShare === "function" && window.matchMedia("(pointer: coarse)").matches;
     if (phone) {
       // The native share sheet can attach the image itself. The image is
       // normally pre-rendered, so share() still runs within the tap.
       return run("Shared", async (node) => {
         const blob = await image(node);
         const file = new File([blob], `bankr-wrapped-${id}.png`, { type: "image/png" });
-        if (navigator.canShare({ files: [file], text })) await navigator.share({ files: [file], text });
+        if (navigator.canShare({ files: [file], text }))
+          await navigator.share({ files: [file], text });
         else window.location.assign(intent);
       });
     }
@@ -199,27 +215,42 @@ export function ShareActions({
   };
 
   const btn =
-    "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2.5 text-xs font-semibold transition-colors disabled:opacity-50";
+    "flex h-10 flex-1 items-center justify-center gap-2 rounded-[10px] px-3 text-sm font-medium transition-colors disabled:opacity-50";
   return (
     <div className="w-full space-y-2">
       <div className="flex gap-2">
-        <button type="button" onClick={post} disabled={status.kind === "busy"} className={`${btn} bg-accent text-accent-foreground`}>
-          <Share2 className="size-3.5" /> Post
+        <button
+          type="button"
+          onClick={post}
+          disabled={status.kind === "busy"}
+          className={`${btn} bg-[#ededed] text-[#141415] hover:bg-white`}
+        >
+          <Share2 className="size-4" strokeWidth={1.5} /> Post
         </button>
         {canCopy && (
-          <button type="button" onClick={copy} disabled={status.kind === "busy"} className={`${btn} bg-white/10 hover:bg-white/15`}>
-            <Copy className="size-3.5" /> Copy
+          <button
+            type="button"
+            onClick={copy}
+            disabled={status.kind === "busy"}
+            className={`${btn} bg-white/10 hover:bg-white/15`}
+          >
+            <Copy className="size-4" strokeWidth={1.5} /> Copy
           </button>
         )}
-        <button type="button" onClick={save} disabled={status.kind === "busy"} className={`${btn} bg-white/10 hover:bg-white/15`}>
-          <Download className="size-3.5" /> Save
+        <button
+          type="button"
+          onClick={save}
+          disabled={status.kind === "busy"}
+          className={`${btn} bg-white/10 hover:bg-white/15`}
+        >
+          <Download className="size-4" strokeWidth={1.5} /> Save
         </button>
       </div>
       <p role="status" className="min-h-4 text-center text-xs text-muted-foreground">
         {status.kind === "busy" && "Getting ready…"}
         {status.kind === "done" && (
           <span className="inline-flex items-center gap-1">
-            <Check className="size-3.5 text-accent" /> {status.label}
+            <Check className="size-4 text-accent" strokeWidth={1.5} /> {status.label}
           </span>
         )}
         {status.kind === "error" && <span className="text-destructive">{status.label}</span>}

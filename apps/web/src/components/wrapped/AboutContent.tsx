@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import { ExternalLink } from "lucide-react";
 
 const WHY_COPY = [
@@ -14,49 +13,40 @@ const BUILDERS = [
 
 export function AboutContent() {
   return (
-    <div className="space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 130, damping: 16 }}
-        className="glass relative overflow-hidden rounded-3xl p-6"
-      >
-        <div className="animate-sweep pointer-events-none absolute inset-0" />
-        <h1 className="mb-3 font-display text-2xl font-extrabold sm:text-3xl">
-          Why <span className="text-gradient">Bankr Wrapped</span> exists
+    <div className="grid gap-12 lg:grid-cols-[7fr_5fr] lg:gap-16">
+      <section>
+        <p className="font-mono text-xs text-[#85858b]">About</p>
+        <h1 className="mt-3 max-w-[18ch] font-display text-4xl font-normal leading-[1.08] tracking-tight lg:text-6xl">
+          Why Bankr Wrapped exists
         </h1>
-        <div className="space-y-3 text-left text-sm leading-relaxed text-muted-foreground">
+        <div className="mt-8 max-w-[40rem] space-y-4 text-[17px] leading-7 text-[#a1a1a6]">
           {WHY_COPY.map((line, i) => (
             <p key={i}>{line}</p>
           ))}
         </div>
-      </motion.div>
+      </section>
 
-      <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
-          Built by
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {BUILDERS.map((b, i) => (
-            <motion.a
-              key={b.handle}
-              href={`https://x.com/${b.handle}`}
-              target="_blank"
-              rel="noreferrer"
-              initial={{ opacity: 0, y: 16, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ type: "spring", stiffness: 140, damping: 16, delay: 0.15 + i * 0.1 }}
-              className="glass flex items-center justify-between gap-2 rounded-2xl p-4 transition-colors hover:border-accent/40"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-display font-bold">{b.name}</p>
-                <p className="truncate text-xs text-muted-foreground">@{b.handle}</p>
-              </div>
-              <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
-            </motion.a>
+      <section className="lg:pt-8">
+        <p className="mb-3 font-mono text-xs text-[#85858b]">Built by</p>
+        <ul className="grid gap-2">
+          {BUILDERS.map((b) => (
+            <li key={b.handle}>
+              <a
+                href={`https://x.com/${b.handle}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-[#19191b] px-5 py-4 transition-colors hover:border-white/20"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{b.name}</p>
+                  <p className="truncate text-sm text-[#a1a1a6]">@{b.handle}</p>
+                </div>
+                <ExternalLink className="size-4 shrink-0 text-[#85858b]" strokeWidth={1.5} />
+              </a>
+            </li>
           ))}
-        </div>
-      </div>
+        </ul>
+      </section>
     </div>
   );
 }

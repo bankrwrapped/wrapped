@@ -1,19 +1,13 @@
 // apps/web/src/components/wrapped/landing/LandingHeader.tsx
 //
-// Fixed site header. Paired Bankr + $BNW logo marks + wordmark, About and
-// Built-by dropdowns, Connect X. Matches the approved landing mockup.
-//
-// Logo marks are gradient placeholders here (same as the mockup) — swap to
-// real <img> from /public once the final marks are dropped in. Connect X
-// scrolls to the merged sign-in block (built in a later chunk); until that
-// section exists it falls back to firing OAuth directly.
+// Fixed site header: logo + wordmark, About and Built-by dropdowns as quiet
+// text buttons, one "Look up" button that jumps to the hero's handle field.
 
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { X_LOGIN_URL } from "@/lib/wrapped-data";
 import { useIsMobile } from "./useMediaQuery";
 import { T } from "./tokens";
-
 
 const BUILDERS = [
   { name: "Kabeer", handle: "basedkabeer" },
@@ -33,11 +27,11 @@ export function LandingHeader() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const connect = () => {
-    const el = document.getElementById("signin-block");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Was `${API_URL}/api/auth/x/start` - a route the API never had.
-    else window.location.assign(X_LOGIN_URL);
+  const lookUp = () => {
+    const input = document.getElementById("lookup-input") as HTMLInputElement | null;
+    if (!input) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    input.focus({ preventScroll: true });
   };
 
   return (
@@ -47,38 +41,42 @@ export function LandingHeader() {
         <span style={logoText}>Bankr Wrapped</span>
       </div>
       <nav ref={navRef} style={nav}>
-        {!mobile ? <Dropdown
-          label="About"
-          isOpen={open === "about"}
-          onToggle={() => setOpen((o) => (o === "about" ? null : "about"))}
-        >
-          <p style={dropText}>
-            A year-in-review for everyone who built on Bankr this year. We read the on-chain
-            record and hand it back to you — community-built, accuracy over estimation.
-          </p>
-        </Dropdown> : null}
+        {!mobile ? (
+          <Dropdown
+            label="About"
+            isOpen={open === "about"}
+            onToggle={() => setOpen((o) => (o === "about" ? null : "about"))}
+          >
+            <p style={dropText}>
+              A year-in-review for everyone who built on Bankr this year. We read the on-chain
+              record and hand it back to you. Community-built, accuracy over estimation.
+            </p>
+          </Dropdown>
+        ) : null}
 
-        {!mobile ? <Dropdown
-          label="Built by"
-          isOpen={open === "built"}
-          onToggle={() => setOpen((o) => (o === "built" ? null : "built"))}
-        >
-          {BUILDERS.map((b) => (
-            <a
-              key={b.handle}
-              href={`https://x.com/${b.handle}`}
-              target="_blank"
-              rel="noreferrer"
-              style={builderRow}
-            >
-              <span>{b.name}</span>
-              <span style={{ color: T.textFaint }}>@{b.handle}</span>
-            </a>
-          ))}
-        </Dropdown> : null}
+        {!mobile ? (
+          <Dropdown
+            label="Built by"
+            isOpen={open === "built"}
+            onToggle={() => setOpen((o) => (o === "built" ? null : "built"))}
+          >
+            {BUILDERS.map((b) => (
+              <a
+                key={b.handle}
+                href={`https://x.com/${b.handle}`}
+                target="_blank"
+                rel="noreferrer"
+                style={builderRow}
+              >
+                <span>{b.name}</span>
+                <span style={{ color: T.textFaint }}>@{b.handle}</span>
+              </a>
+            ))}
+          </Dropdown>
+        ) : null}
 
-        <button type="button" onClick={connect} style={pillPrimary}>
-          Connect X
+        <button type="button" onClick={lookUp} className="btn-primary" style={pillPrimary}>
+          Look up
         </button>
       </nav>
     </header>
@@ -101,10 +99,20 @@ function Dropdown({
       <button
         type="button"
         onClick={onToggle}
+        className="btn-quiet"
         style={pill}
         aria-expanded={isOpen}
       >
-        {label} ▾
+        {label}
+        <ChevronDown
+          size={16}
+          strokeWidth={1.5}
+          aria-hidden
+          style={{
+            transform: isOpen ? "rotate(180deg)" : undefined,
+            transition: "transform 160ms cubic-bezier(0.22, 1, 0.36, 1)",
+          }}
+        />
       </button>
       {isOpen ? <div style={dropdown}>{children}</div> : null}
     </div>
@@ -117,67 +125,77 @@ const header: React.CSSProperties = {
   left: 0,
   right: 0,
   zIndex: 40,
+  height: "64px",
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "14px 18px",
-  background: "rgba(12,10,9,0.7)",
+  padding: "0 clamp(20px, 4vw, 64px)",
+  background: "rgba(20,20,21,0.88)",
   backdropFilter: "blur(12px)",
   WebkitBackdropFilter: "blur(12px)",
   borderBottom: `1px solid ${T.border}`,
-  fontFamily: T.fontMono,
-  fontSize: "11px",
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
+  fontFamily: T.fontBody,
+  fontSize: "14px",
 };
 
-const logo: React.CSSProperties = { display: "flex", alignItems: "center", gap: "10px" };
-const mark: React.CSSProperties = { width: "28px", height: "28px", borderRadius: "7px", display: "block", objectFit: "contain" };
-const logoText: React.CSSProperties = { color: "#c9c2b8", whiteSpace: "nowrap" };
+const logo: React.CSSProperties = { display: "flex", alignItems: "center", gap: "8px" };
+const mark: React.CSSProperties = {
+  width: "28px",
+  height: "28px",
+  borderRadius: "6px",
+  display: "block",
+  objectFit: "contain",
+};
+const logoText: React.CSSProperties = {
+  color: T.text,
+  fontWeight: 500,
+  fontSize: "16px",
+  whiteSpace: "nowrap",
+};
 
-const nav: React.CSSProperties = { display: "flex", alignItems: "center", gap: "10px" };
+const nav: React.CSSProperties = { display: "flex", alignItems: "center", gap: "4px" };
 
 const pill: React.CSSProperties = {
-  padding: "8px 15px",
-  borderRadius: "999px",
-  border: `1px solid ${T.borderStrong}`,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "4px",
+  height: "36px",
+  padding: "0 12px",
+  borderRadius: "8px",
+  border: "none",
   color: T.textDim,
   fontFamily: "inherit",
   fontSize: "inherit",
-  letterSpacing: "inherit",
-  textTransform: "inherit",
   cursor: "pointer",
   background: "transparent",
 };
 
 const pillPrimary: React.CSSProperties = {
   ...pill,
-  background: "linear-gradient(180deg, rgba(159,123,255,0.16), transparent)",
-  borderColor: "rgba(159,123,255,0.3)",
-  color: T.violetBright,
+  marginLeft: "8px",
+  padding: "0 16px",
+  background: T.text,
+  color: T.ink,
+  fontWeight: 500,
 };
 
 const dropdown: React.CSSProperties = {
   position: "absolute",
-  top: "calc(100% + 10px)",
+  top: "calc(100% + 8px)",
   right: 0,
   width: "300px",
-  padding: "16px 18px",
+  padding: "16px",
   textAlign: "left",
-  textTransform: "none",
-  letterSpacing: "normal",
   border: `1px solid ${T.border}`,
-  borderRadius: "14px",
-  background: "linear-gradient(180deg, rgba(20,16,24,0.98), rgba(12,10,9,0.98))",
-  backdropFilter: "blur(12px)",
-  WebkitBackdropFilter: "blur(12px)",
-  boxShadow: "0 20px 50px -20px rgba(0,0,0,0.7)",
+  borderRadius: "12px",
+  background: T.card,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
 };
 
 const dropText: React.CSSProperties = {
   fontFamily: T.fontBody,
-  fontSize: "13px",
-  lineHeight: 1.6,
+  fontSize: "14px",
+  lineHeight: "20px",
   color: T.textDim,
   margin: 0,
 };
@@ -185,10 +203,10 @@ const dropText: React.CSSProperties = {
 const builderRow: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  padding: "9px 8px",
+  padding: "8px",
   borderRadius: "8px",
   fontFamily: T.fontBody,
-  fontSize: "12.5px",
+  fontSize: "14px",
   color: T.text,
   textDecoration: "none",
 };

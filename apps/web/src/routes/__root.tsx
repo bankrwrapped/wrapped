@@ -8,7 +8,6 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
-import { Footer } from "@/components/wrapped/Footer";
 import { Backdrop } from "@/components/wrapped/terminal/Backdrop";
 
 import appCss from "../styles.css?url";
@@ -18,34 +17,34 @@ function BrandBackdrop() {
   return (
     <>
       <Backdrop />
-      <div className="fixed left-5 top-5 z-20 flex items-center gap-2.5">
-        <div className="glass flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full">
-          <img src="/logo.png" alt="Bankr" className="size-full object-cover" />
-        </div>
-        <span className="font-display text-sm font-bold tracking-tight">
-          Bankr <span className="text-gradient">Wrapped</span>
-        </span>
+      <div className="page-pad fixed inset-x-0 top-0 z-20 flex h-16 items-center gap-2">
+        <img src="/logo.png" alt="" className="size-7 rounded-md object-contain" />
+        <span className="text-base font-medium">Bankr Wrapped</span>
       </div>
     </>
   );
 }
 
+const primaryBtn =
+  "inline-flex h-11 items-center justify-center rounded-[10px] bg-[#ededed] px-5 text-[15px] font-medium text-[#141415] transition-colors hover:bg-white";
+const secondaryBtn =
+  "inline-flex h-11 items-center justify-center rounded-[10px] border border-white/10 bg-[#232325] px-5 text-[15px] font-medium transition-colors hover:border-white/20";
+
 function NotFoundComponent() {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#141415] px-5">
       <BrandBackdrop />
-      <div className="glass relative z-10 max-w-md space-y-3 rounded-3xl p-8 text-center">
-        <h1 className="font-display text-7xl font-extrabold text-gradient">404</h1>
-        <h2 className="font-display text-xl font-semibold">Page not found</h2>
-        <p className="text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
+      <div className="relative z-10 w-full max-w-[34rem]">
+        <p className="font-mono text-xs text-[#85858b]">404</p>
+        <h1 className="mt-3 font-display text-[32px] font-normal leading-tight tracking-tight">
+          Page not found
+        </h1>
+        <p className="mt-3 text-[15px] leading-6 text-[#a1a1a6]">
+          This page doesn&rsquo;t exist or has moved. Look up a handle from the start page instead.
         </p>
-        <div className="pt-3">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-primary to-accent px-5 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
-          >
-            Go home
+        <div className="mt-8">
+          <Link to="/" className={primaryBtn}>
+            Go to the start
           </Link>
         </div>
       </div>
@@ -61,29 +60,28 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   }, [error]);
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#141415] px-5">
       <BrandBackdrop />
-      <div className="glass relative z-10 max-w-md space-y-3 rounded-3xl p-8 text-center">
-        <h1 className="font-display text-xl font-semibold tracking-tight">
-          This page didn't load
+      <div className="relative z-10 w-full max-w-[34rem]">
+        <p className="font-mono text-xs text-[#85858b]">Error</p>
+        <h1 className="mt-3 font-display text-[32px] font-normal leading-tight tracking-tight">
+          This page didn&rsquo;t load
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+        <p className="mt-3 text-[15px] leading-6 text-[#a1a1a6]">
+          Something went wrong on our side. Try again, or head back to the start.
         </p>
-        <div className="flex flex-wrap justify-center gap-2 pt-3">
+        <div className="mt-8 flex flex-wrap gap-2">
           <button
             onClick={() => {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-primary to-accent px-5 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+            className={primaryBtn}
           >
             Try again
           </button>
-          <a href="/"
-            className="glass inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-medium transition-colors hover:text-accent"
-          >
-            Go home
+          <a href="/" className={secondaryBtn}>
+            Go to the start
           </a>
         </div>
       </div>
@@ -146,7 +144,6 @@ function RootComponent() {
           on every single page load for zero visible benefit. */}
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
-      <Footer />
     </QueryClientProvider>
   );
 }
