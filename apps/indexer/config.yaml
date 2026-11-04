@@ -170,34 +170,39 @@ contracts:
 
 chains:
   - id: 8453 # Base mainnet
-    # The Clanker v3.1 factory's deployment block (on-chain, 2026-10-17). Every
-    # other contract keeps its own start_block below (Airlock's deployment,
-    # 28415516 - the previous chain start), so nothing else is replayed from
-    # this earlier block. All Clanker v4 contracts deployed after 28415516.
+    # The Clanker v3.1 factory's deployment block (on-chain, 2026-10-17).
+    # Every contract below starts here too, on purpose: with envio 3.6, giving
+    # contracts different start_blocks (v3.1 at 27733337, the rest at
+    # 28415516, Airlock's deployment) made Base never advance - one getLogs,
+    # then it waited forever (seen 2026-11-04, a 21-hour local run stuck at
+    # the start). Contracts deployed later simply have no events in
+    # 27733337..28415516; the only extra work is scanning that range for
+    # PoolManager swaps and wildcard Doppler events, which the handlers
+    # ignore for pools and launches they don't know.
     start_block: 27733337
     contracts:
       - name: Airlock
-        start_block: 28415516
+        start_block: 27733337
         address:
           - "0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12"
       - name: PoolManager
-        start_block: 28415516
+        start_block: 27733337
         address:
           - "0x498581fF718922c3f8e6A244956aF099B2652b2b"
       - name: DopplerFees
-        start_block: 28415516
+        start_block: 27733337
         # no address: wildcard (src/EventHandlers.ts). The StreamableFeesLockerV2
         # address that used to be the only source is in DOPPLER_FEE_LOCKERS.
       - name: Clanker
-        start_block: 28415516
+        start_block: 27733337
         address:
           - "0xE85A59c628F7d27878ACeB4bf3b35733630083a9"
       - name: ClankerFeeLocker
-        start_block: 28415516
+        start_block: 27733337
         address:
           - "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68"
       - name: ClankerLpLocker
-        start_block: 28415516
+        start_block: 27733337
         address:
           - "0x29d17C1A8D851d7d4cA97FAe97AcAdb398D9cCE0" # ClankerLpLocker
           - "0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496" # ClankerLpLockerFeeConversion
@@ -206,7 +211,7 @@ chains:
         address:
           - "0x2A787b2362021cC3eEa3C24C4748a6cD5B687382"
       - name: ClankerV31LpLocker
-        start_block: 27733342 # LpLockerv2 deployment
+        start_block: 27733337 # LpLockerv2 deployment (27733342)
         address:
           - "0x33e2Eda238edcF470309b8c6D228986A1204c8f9"
 
