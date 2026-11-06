@@ -11,13 +11,10 @@ import { useIsMobile } from "./useMediaQuery";
 import { T, eyebrow } from "./tokens";
 
 // Bankr-wide, all time. Volume and creator fees as shown on bankr.bot
-// (checked Nov 2026); accounts and agent requests are the earlier figures
-// and still need a source.
+// (checked Nov 2026). Only add a figure here once it has a public source.
 const STATS = [
   { value: "$5.58B", label: "traded through Bankr" },
   { value: "$24.28M", label: "paid to creators" },
-  { value: "1M+", label: "accounts" },
-  { value: "4M+", label: "agent requests" },
 ] as const;
 
 export function LandingHero() {
@@ -185,7 +182,7 @@ const caption: React.CSSProperties = {
 
 const strip = (m: boolean): React.CSSProperties => ({
   display: "grid",
-  gridTemplateColumns: m ? "1fr 1fr" : "repeat(4, 1fr)",
+  gridTemplateColumns: `repeat(${STATS.length}, 1fr)`,
   gap: "1px",
   margin: m ? "48px 0 0" : "64px 0 0",
   borderRadius: "12px",
