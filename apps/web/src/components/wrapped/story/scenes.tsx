@@ -479,9 +479,9 @@ function VolumeScene({ p }: { p: WrappedProfile }) {
   );
 }
 
-function VerdictScene({ p }: { p: WrappedProfile }) {
+function VerdictScene({ p, boards }: { p: WrappedProfile; boards: BoardResult[] | null }) {
   const reduce = useReducedMotion();
-  const a = getArchetype(p);
+  const a = getArchetype(p, boards);
   return (
     <Stage>
       <Eyebrow>Bankr's verdict</Eyebrow>
@@ -609,7 +609,7 @@ export function buildScenes(ctx: CardContext): Scene[] {
     has("rhythm", ctx) && { id: "rhythm", duration: bars(4), palette: P.rhythm, cut: "zoom", energy: 3, render: (c) => <RhythmScene p={c.profile} /> },
     // Pending volume gets the "still counting" scene; it may land mid-story.
     (has("volume", ctx) || (p.tokensLaunched > 0 && p.tradingVolume.status === "pending")) && { id: "volume", duration: bars(3), palette: P.volume, cut: "whip", energy: 2, render: (c) => <VolumeScene p={c.profile} /> },
-    has("verdict", ctx) && { id: "verdict", duration: bars(4), palette: P.verdict, cut: "flash", energy: 4, render: (c) => <VerdictScene p={c.profile} /> },
+    has("verdict", ctx) && { id: "verdict", duration: bars(4), palette: P.verdict, cut: "flash", energy: 4, render: (c) => <VerdictScene p={c.profile} boards={c.boards} /> },
     has("rankings", ctx) && { id: "ranks", duration: bars(3), palette: P.ranks, cut: "iris", energy: 3, render: (c) => <RanksScene boards={c.boards ?? []} /> },
     { id: "outro", duration: bars(3), palette: P.outro, cut: "fade", energy: 1, render: (c) => <OutroScene cards={CARDS.filter((d) => d.available(c)).length} /> },
   ];

@@ -441,9 +441,9 @@ export const CARDS: CardDef[] = [
     eyebrow: "Bankr's verdict",
     tone: "magenta",
     available: ({ profile: p }) => p.creatorFeesStatus !== "unavailable",
-    shareText: ({ profile: p }) => `Bankr's verdict on me: ${getArchetype(p).title}.`,
-    Body: ({ profile: p }) => {
-      const a = getArchetype(p);
+    shareText: ({ profile: p, boards }) => `Bankr's verdict on me: ${getArchetype(p, boards).title}.`,
+    Body: ({ profile: p, boards }) => {
+      const a = getArchetype(p, boards);
       return (
         <>
           <span

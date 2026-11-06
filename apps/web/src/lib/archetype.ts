@@ -1,4 +1,4 @@
-import type { WrappedProfile } from "@/lib/wrapped-data";
+import type { BoardResult, WrappedProfile } from "@/lib/wrapped-data";
 
 export type Archetype = {
   title: string;
@@ -14,7 +14,16 @@ export type Archetype = {
  * not measured against real distribution data yet. Expect to tune these
  * once run against real wallets. Only the copy voice changed here.
  */
-export function getArchetype(p: WrappedProfile): Archetype {
+// "The Whale" is about standing, not just a dollar figure: $5k could still be
+// the bottom of the earnings board. When the board is known, the handle must
+// also sit in its top 10% (at least the top 3), so #20 of 26 doesn't get it.
+function isTopEarner(boards: BoardResult[] | null | undefined): boolean {
+  const board = boards?.find((b) => b.id === "earnings");
+  if (!board?.personal) return true; // board unknown: the threshold alone decides
+  return board.personal.rank <= Math.max(3, Math.ceil(board.total * 0.1));
+}
+
+export function getArchetype(p: WrappedProfile, boards?: BoardResult[] | null): Archetype {
   // p.creatorEarnings/p.pleaseBroEarnings now include BOTH claimed and
   // still-claimable amounts (see wrappedService.ts) - totalEarned is
   // already the full lifetime figure, so nothing should add p.unclaimed
@@ -23,7 +32,7 @@ export function getArchetype(p: WrappedProfile): Archetype {
   const claimedOnly = totalEarned - p.unclaimed;
 
   // Whale
-  if (totalEarned >= 5000) {
+  if (totalEarned >= 5000 && isTopEarner(boards)) {
     return {
       title: "The Whale",
       description: "Ran the numbers twice. They didn't change. You're one of ours now.",
